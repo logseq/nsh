@@ -112,7 +112,13 @@ impl Mounter {
                 let before = before
                     .and_then(|b| self.views.get(&b))
                     .filter(|b| b.parent().as_ref() == Some(parent.upcast_ref()));
-                if child.parent().is_some() {
+                // GTK reorders an existing child without unrooting its subtree.
+                // Unparenting first would interrupt a focused descendant's editor.
+                if child
+                    .parent()
+                    .as_ref()
+                    .is_some_and(|old| old != parent.upcast_ref::<gtk4::Widget>())
+                {
                     child.unparent();
                 }
                 child.insert_before(parent, before);
@@ -470,5 +476,236 @@ impl Mounter {
             }
             other => crate::system::command(surface, id, other),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{cell::Cell, rc::Rc};
+
+    use gtk4::{self as gtk, glib, prelude::*};
+    use nsh_core::{MountItem, ROOT_ID, ViewKind};
+
+    use crate::gtk_test;
+
+    fn focused_reorder(nested: bool) {
+        gtk_test::run(move || {
+            let surface = gtk_test::surface();
+            let kind = if nested {
+                ViewKind::View
+            } else {
+                ViewKind::Input
+            };
+            gtk_test::apply(
+                &surface,
+                &[
+                    MountItem::Create { id: 2, kind },
+                    MountItem::Create {
+                        id: 4,
+                        kind: ViewKind::View,
+                    },
+                    MountItem::Frame {
+                        id: 2,
+                        frame: gtk_test::frame(0.0, 0.0, 180.0, 40.0),
+                    },
+                    MountItem::Frame {
+                        id: 4,
+                        frame: gtk_test::frame(0.0, 50.0, 180.0, 40.0),
+                    },
+                    MountItem::Insert {
+                        parent: ROOT_ID,
+                        child: 2,
+                        before: None,
+                    },
+                    MountItem::Insert {
+                        parent: ROOT_ID,
+                        child: 4,
+                        before: None,
+                    },
+                ],
+            );
+            let input_id = if nested {
+                gtk_test::apply(
+                    &surface,
+                    &[
+                        MountItem::Create {
+                            id: 6,
+                            kind: ViewKind::Input,
+                        },
+                        MountItem::Frame {
+                            id: 6,
+                            frame: gtk_test::frame(0.0, 0.0, 180.0, 40.0),
+                        },
+                        MountItem::Insert {
+                            parent: 2,
+                            child: 6,
+                            before: None,
+                        },
+                    ],
+                );
+                6
+            } else {
+                2
+            };
+            gtk_test::apply(
+                &surface,
+                &[
+                    MountItem::Input {
+                        id: input_id,
+                        config: Box::default(),
+                    },
+                    MountItem::InputValue {
+                        id: input_id,
+                        text: "retained draft".into(),
+                        count: 0,
+                    },
+                    MountItem::InputContent {
+                        id: input_id,
+                        content: gtk_test::frame(0.0, 0.0, 180.0, 40.0),
+                    },
+                ],
+            );
+            let input = gtk_test::view(&surface, input_id);
+            let moving = gtk_test::view(&surface, 2);
+            let editor = input
+                .state()
+                .natives
+                .iter()
+                .find_map(|native| native.widget.clone().downcast::<gtk::Text>().ok())
+                .expect("the input hosts its native GTK editor");
+            let window = gtk_test::show(&surface);
+            assert!(gtk_test::wait_until(|| editor.is_mapped()));
+            assert!(editor.grab_focus());
+            editor.select_region(2, 7);
+            let focus = || editor.root().and_then(|root| root.focus());
+            assert_eq!(focus().as_ref(), Some(editor.upcast_ref::<gtk::Widget>()));
+
+            let detached = Rc::new(Cell::new(0));
+            for widget in [
+                moving.clone().upcast::<gtk::Widget>(),
+                editor.clone().upcast(),
+            ] {
+                let seen = detached.clone();
+                widget.connect_root_notify(move |_| seen.set(seen.get() + 1));
+                let seen = detached.clone();
+                widget.connect_unrealize(move |_| seen.set(seen.get() + 1));
+            }
+            let parents = Rc::new(Cell::new(0));
+            let seen = parents.clone();
+            moving.connect_parent_notify(move |_| seen.set(seen.get() + 1));
+
+            // Forward, backward, already in place, and a self anchor all retain
+            // the live GTK subtree. No focus command repairs a move afterward.
+            for (before, expected) in [
+                (None, [4, 2]),
+                (Some(4), [2, 4]),
+                (Some(4), [2, 4]),
+                (Some(2), [2, 4]),
+            ] {
+                gtk_test::apply(
+                    &surface,
+                    &[MountItem::Insert {
+                        parent: ROOT_ID,
+                        child: 2,
+                        before,
+                    }],
+                );
+                assert_eq!(parents.get(), 0, "same-parent insertion never unparents");
+                assert_eq!(detached.get(), 0, "the editor stays rooted and realized");
+                // Let deferred GTK focus reconciliation run across a frame.
+                let frames = Rc::new(Cell::new(0));
+                let seen = frames.clone();
+                window.add_tick_callback(move |_, _| {
+                    seen.set(seen.get() + 1);
+                    if seen.get() < 2 {
+                        glib::ControlFlow::Continue
+                    } else {
+                        glib::ControlFlow::Break
+                    }
+                });
+                assert!(gtk_test::wait_until(|| frames.get() == 2));
+                assert_eq!(focus().as_ref(), Some(editor.upcast_ref::<gtk::Widget>()));
+                assert_eq!(editor.selection_bounds(), Some((2, 7)));
+                assert_eq!(editor.text(), "retained draft");
+                assert_eq!(gtk_test::view(&surface, input_id), input);
+                assert_eq!(
+                    surface
+                        .root
+                        .child_views()
+                        .iter()
+                        .map(|child| child.id())
+                        .collect::<Vec<_>>(),
+                    expected,
+                );
+                assert_eq!(detached.get(), 0, "no delayed detach notification");
+            }
+            window.destroy();
+        });
+    }
+
+    #[test]
+    fn same_parent_insert_keeps_a_focused_editor_rooted() {
+        focused_reorder(false);
+    }
+
+    #[test]
+    fn same_parent_insert_keeps_a_focused_descendant_rooted() {
+        focused_reorder(true);
+    }
+
+    #[test]
+    fn cross_parent_insert_still_detaches_from_the_old_parent() {
+        gtk_test::run(|| {
+            let surface = gtk_test::surface();
+            for id in [2, 4, 6] {
+                gtk_test::apply(
+                    &surface,
+                    &[MountItem::Create {
+                        id,
+                        kind: ViewKind::View,
+                    }],
+                );
+            }
+            gtk_test::apply(
+                &surface,
+                &[
+                    MountItem::Insert {
+                        parent: ROOT_ID,
+                        child: 2,
+                        before: None,
+                    },
+                    MountItem::Insert {
+                        parent: ROOT_ID,
+                        child: 4,
+                        before: None,
+                    },
+                    MountItem::Insert {
+                        parent: 2,
+                        child: 6,
+                        before: None,
+                    },
+                ],
+            );
+            let child = gtk_test::view(&surface, 6);
+            let detached = Rc::new(Cell::new(false));
+            let seen = detached.clone();
+            child.connect_parent_notify(move |child| {
+                if child.parent().is_none() {
+                    seen.set(true);
+                }
+            });
+            gtk_test::apply(
+                &surface,
+                &[MountItem::Insert {
+                    parent: 4,
+                    child: 6,
+                    before: None,
+                }],
+            );
+            assert!(detached.get(), "a genuine reparent still detaches first");
+            assert!(gtk_test::view(&surface, 2).child_views().is_empty());
+            assert_eq!(gtk_test::view(&surface, 4).child_views(), [child.clone()]);
+            assert_eq!(child.parent_view(), Some(gtk_test::view(&surface, 4)));
+        });
     }
 }
