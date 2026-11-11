@@ -704,7 +704,10 @@ mod tests {
             );
             assert!(detached.get(), "a genuine reparent still detaches first");
             assert!(gtk_test::view(&surface, 2).child_views().is_empty());
-            assert_eq!(gtk_test::view(&surface, 4).child_views(), [child.clone()]);
+            assert_eq!(
+                gtk_test::view(&surface, 4).child_views().as_slice(),
+                std::slice::from_ref(&child),
+            );
             assert_eq!(child.parent_view(), Some(gtk_test::view(&surface, 4)));
         });
     }
