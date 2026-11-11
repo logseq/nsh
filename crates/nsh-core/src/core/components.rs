@@ -4416,13 +4416,13 @@ impl<M: TextEngine> Core<M> {
             let made = std::cell::Cell::new(false);
             crate::element::computed(move || {
                 let (count, keys) = rows();
-                let splice = match (&*last.borrow(), &keys) {
-                    (Some(old), Some(new)) => crate::element::virtual_list::splice(old, new),
+                let change = match (&*last.borrow(), &keys) {
+                    (Some(old), Some(new)) => crate::element::virtual_list::rows_change(old, new),
                     _ => None,
                 };
                 last.replace(keys.clone());
                 if made.replace(true) {
-                    move_rows(&cells, splice, count);
+                    move_rows(&cells, change.as_ref(), count);
                     count_signal.set(count as usize);
                     patches.borrow_mut().push(super::views::Patch::Rows {
                         list: id,
@@ -4485,12 +4485,23 @@ impl<M: TextEngine> Core<M> {
         keys: Option<&Rc<[u64]>>,
     ) {
         if let (Some((_, Some(old))), Some(new)) = (before, keys)
-            && let Some((at, removed, inserted)) = crate::element::virtual_list::splice(old, new)
+            && let Some(change) = crate::element::virtual_list::rows_change(old, new)
         {
-            let _ = self.apply_op(Op::SetProp {
-                id,
-                prop: Prop::Splice(at, removed, inserted),
-            });
+            if change.reordered() {
+                if let Ok(key) = self.key(id) {
+                    let node = &mut self.nodes[key as usize];
+                    let loads_at_start = node.events.contains(EventKind::LoadMoreAtStart);
+                    if let Some(list) = node.list.as_mut() {
+                        list.loads_at_start = loads_at_start;
+                        list.reorder(&change);
+                    }
+                }
+            } else {
+                let _ = self.apply_op(Op::SetProp {
+                    id,
+                    prop: Prop::Splice(change.at, change.removed, change.inserted),
+                });
+            }
         }
         if before.map(|(count, _)| *count) != Some(count) {
             let _ = self.apply_op(Op::SetProp {
@@ -6723,7 +6734,7 @@ fn dispose_rows(rows: &std::rc::Weak<RefCell<CellRowMap>>) {
 /// row went keeps its index (the list frees it, and binds it to another row
 /// before showing it again) while that is a row; past the rows, its content
 /// is disposed, before its bindings could read there.
-fn move_rows(cells: &CellRows, splice: Option<(u32, u32, u32)>, count: u32) {
+fn move_rows(cells: &CellRows, change: Option<&virtual_list::RowsChange>, count: u32) {
     let parts: Vec<_> = cells
         .borrow()
         .iter()
@@ -6736,17 +6747,9 @@ fn move_rows(cells: &CellRows, splice: Option<(u32, u32, u32)>, count: u32) {
             continue;
         }
         let i = index.get_untracked();
-        let to = match splice {
-            Some((at, removed, inserted)) => {
-                let (at, removed, inserted) = (at as usize, removed as usize, inserted as usize);
-                if i < at || (at..at + removed).contains(&i) {
-                    i
-                } else {
-                    i - removed + inserted
-                }
-            }
-            None => i,
-        };
+        let to = change
+            .and_then(|change| change.position(i as u32))
+            .map_or(i, |position| position as usize);
         if to < count as usize {
             index.set(to);
         } else {

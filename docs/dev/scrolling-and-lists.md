@@ -135,3 +135,6 @@
   lists bind in the core, unpaced.
 - **Rust components**: the same props are `Scrollable`'s methods (`scroll()`, `virtual_list(..)`) and
   `VirtualList`'s (header, footer, empty view, separators, sticky rows, viewability); `docs/dev/components.md`.
+  Rust `VirtualList::keys` retains cells, interaction owners and measured sizes by unique key during reorder
+  (`element/virtual_list.rs::rows_change`, `ListState::reorder`). Pure insert/remove keeps the contiguous-splice
+  path. The key map is built only on source changes; scrolling and property bindings do not build it.

@@ -137,7 +137,7 @@ const toggle = (id: number) =>
 
 ## 修改数据
 
-在 Rust 中，把行数写成 signal 或闭包（`move || posts.with(Vec::len)`）：列表会原地增长和收缩。只在末尾增删的行不需要做别的；在其他位置增删行时，用 `.keys(move || posts.with(|p| p.iter().map(|p| p.id).collect::<Vec<_>>()))` 给出各行的标识，列表会保留相同的开头和结尾，中间部分视为删除和插入。
+In Rust, give the count as a signal or a closure (`move || posts.with(Vec::len)`): the list grows and shrinks in place. Rows added or removed at the end need nothing more; when rows are inserted, removed or reordered elsewhere, give stable, unique identities with `.keys(move || posts.with(|p| p.iter().map(|p| p.id).collect::<Vec<_>>()))`. Retained cells, focus and row measurements follow their keys to the new positions. Keep the key count equal to the row count.
 
 在 TSX 中，传入新数组即可改变条目：`posts.set([...posts(), ...more])`。列表会**按条目标识**（`===`）比较新旧数组，保留相同的开头和结尾，中间部分视为删除和插入。
 

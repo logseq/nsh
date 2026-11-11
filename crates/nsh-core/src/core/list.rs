@@ -595,52 +595,7 @@ impl ListState {
                 None
             }
         };
-        self.kept = self.kept.iter().filter_map(|&i| shift(i)).collect();
-        self.by_index.clear();
-        for (slot, s) in self.slots.iter_mut().enumerate() {
-            let index = s.index.and_then(shift);
-            let Some(new) = index else {
-                if s.index.take().is_some() {
-                    self.free.push(slot as u32);
-                } else if let (Some(r), Some(n)) = (s.requested, s.requested.and_then(shift))
-                    && s.rendered == Some(r)
-                {
-                    // A free cell still showing an item that stays follows
-                    // it (the runtime is told), so the item gets it back.
-                    s.requested = Some(n);
-                    s.rendered = Some(n);
-                    if n != r {
-                        self.moved.push((slot as u32, n));
-                    }
-                    continue;
-                }
-                // The cell's content follows the new data at its old index:
-                // it is bound again before it shows.
-                s.rendered = None;
-                s.requested = None;
-                continue;
-            };
-            s.index = Some(new);
-            s.rendered = s.rendered.and_then(shift);
-            // The runtime's index for the cell follows its item at once, or
-            // its content shows the item now at the old index.
-            match s.requested.map(|r| (r, shift(r))) {
-                Some((r, Some(n))) => {
-                    s.requested = Some(n);
-                    if n != r {
-                        self.moved.push((slot as u32, n));
-                    }
-                }
-                Some((_, None)) => {
-                    s.requested = None;
-                    s.rendered = None;
-                }
-                None => {}
-            }
-            self.by_index.insert(new, slot as u32);
-        }
-        self.free.sort_unstable();
-        self.free.dedup();
+        self.move_cells(shift);
         if removed == 0 && at + inserted == self.count {
             // Appended: the rows before stay as they are.
             self.resize_rows(at);
@@ -664,6 +619,102 @@ impl ListState {
                 self.keep_in_place(moved_to, from_top);
             }
         }
+    }
+
+    /// A source reorder keeps measurements and interaction owners with keys.
+    pub(super) fn reorder(&mut self, change: &crate::element::virtual_list::RowsChange) {
+        let anchor = self.visible_anchor();
+        let natural_before = self.natural_offset();
+        let count = self.count - change.removed + change.inserted;
+        let mut sizes = vec![f32::NAN; count as usize];
+        for (index, size) in self.sizes.iter().enumerate() {
+            if let Some(to) = change.position(index as u32) {
+                sizes[to as usize] = *size;
+            }
+        }
+        self.sizes = sizes;
+        self.count = count;
+        self.items_changed = true;
+        self.move_cells(|index| change.position(index));
+        self.columns_anchor = self.columns_anchor.and_then(|index| change.position(index));
+        self.pin = self.pin.and_then(|mut pin| {
+            if let PinTarget::Index {
+                index,
+                view_position,
+                view_offset,
+            } = pin.target
+            {
+                pin.target = PinTarget::Index {
+                    index: change.position(index)?,
+                    view_position,
+                    view_offset,
+                };
+            }
+            Some(pin)
+        });
+        self.rebuild_offsets();
+        self.load_more_at = None;
+        if let Some((index, from_top)) = anchor
+            && let Some(to) = change.position(index)
+        {
+            if self.inverted {
+                let delta = (self.item_at(to) - from_top).max(0.0) - natural_before;
+                self.offset -= delta;
+                self.splice_anchor -= delta;
+            } else {
+                self.keep_in_place(to, from_top);
+            }
+        }
+    }
+
+    /// The same slot bookkeeping serves contiguous splices and keyed moves.
+    fn move_cells(&mut self, position: impl Fn(u32) -> Option<u32>) {
+        self.kept = self.kept.iter().filter_map(|&i| position(i)).collect();
+        self.by_index.clear();
+        for (slot, s) in self.slots.iter_mut().enumerate() {
+            let index = s.index.and_then(&position);
+            let Some(new) = index else {
+                if s.index.take().is_some() {
+                    self.free.push(slot as u32);
+                } else if let (Some(r), Some(n)) = (s.requested, s.requested.and_then(&position))
+                    && s.rendered == Some(r)
+                {
+                    // A free cell still showing an item that stays follows
+                    // it (the runtime is told), so the item gets it back.
+                    s.requested = Some(n);
+                    s.rendered = Some(n);
+                    if n != r {
+                        self.moved.push((slot as u32, n));
+                    }
+                    continue;
+                }
+                // The cell's content follows the new data at its old index:
+                // it is bound again before it shows.
+                s.rendered = None;
+                s.requested = None;
+                continue;
+            };
+            s.index = Some(new);
+            s.rendered = s.rendered.and_then(&position);
+            // The runtime's index for the cell follows its item at once, or
+            // its content shows the item now at the old index.
+            match s.requested.map(|r| (r, position(r))) {
+                Some((r, Some(n))) => {
+                    s.requested = Some(n);
+                    if n != r {
+                        self.moved.push((slot as u32, n));
+                    }
+                }
+                Some((_, None)) => {
+                    s.requested = None;
+                    s.rendered = None;
+                }
+                None => {}
+            }
+            self.by_index.insert(new, slot as u32);
+        }
+        self.free.sort_unstable();
+        self.free.dedup();
     }
 
     /// The first visible item and where it is in the viewport, for a
@@ -2986,6 +3037,65 @@ mod tests {
         binds.clear();
         l.update_window(&mut binds);
         assert!(!bound(&l, 3));
+    }
+
+    #[test]
+    fn keyed_reorder_keeps_multiple_cells_measurements_and_scroll_target() {
+        let mut l = list(8, 20.0, 40.0);
+        for index in 0..8 {
+            l.measured(index, 20.0 + index as f32);
+        }
+        let sizes = l.sizes.clone();
+        l.set_kept(vec![2, 7]);
+        let mut binds = Vec::new();
+        bind_all(&mut l, &mut binds);
+        let cell = |l: &ListState, index| {
+            l.slots
+                .iter()
+                .find(|slot| slot.index == Some(index))
+                .unwrap()
+                .cell
+        };
+        let cells = [cell(&l, 2), cell(&l, 7)];
+        l.pin(
+            Some(PinTarget::Index {
+                index: 2,
+                view_position: 0.5,
+                view_offset: 3.0,
+            }),
+            l.offset,
+            false,
+        );
+        let change = crate::element::virtual_list::rows_change(
+            &[0, 1, 2, 3, 4, 5, 6, 7],
+            &[7, 2, 3, 99, 6, 5, 4],
+        )
+        .unwrap();
+        l.reorder(&change);
+        assert_eq!(l.count, 7);
+        assert_eq!(l.sizes[0], sizes[7]);
+        assert_eq!(l.sizes[1], sizes[2]);
+        assert!(l.sizes[3].is_nan());
+        assert!(l.kept.contains(&0) && l.kept.contains(&1));
+        assert_eq!(
+            l.pin.unwrap().target,
+            PinTarget::Index {
+                index: 1,
+                view_position: 0.5,
+                view_offset: 3.0
+            }
+        );
+        bind_all(&mut l, &mut binds);
+        assert_eq!(cell(&l, 1), cells[0]);
+        assert_eq!(cell(&l, 0), cells[1]);
+        let change = crate::element::virtual_list::rows_change(
+            &[7, 2, 3, 99, 6, 5, 4],
+            &[7, 3, 99, 6, 5, 4, 100],
+        )
+        .unwrap();
+        l.reorder(&change);
+        assert!(l.pin.is_none(), "removed scroll target survived");
+        assert_eq!(l.kept, [0]);
     }
 
     /// An inverted chat scrolled into its history (rows 84..92 on screen),

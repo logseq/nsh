@@ -19196,6 +19196,83 @@ mod views {
         assert_eq!(creates(&batch), 0, "{:?}", batch.items);
     }
 
+    #[derive(Clone, PartialEq, Props)]
+    struct ReorderedRowsProps {
+        count: crate::element::Prop<usize>,
+    }
+
+    #[component]
+    fn ReorderedRows(props: ReorderedRowsProps) -> impl IntoElement {
+        let count = props.count.get_untracked();
+        let rows = signal((0..count).collect::<Vec<_>>());
+        view()
+            .flex_1()
+            .on_press(move || {
+                rows.update(|rows| {
+                    rows.swap(2, count - 1);
+                    rows.swap(7, count - 2);
+                })
+            })
+            .child(
+                virtual_list(
+                    move || rows.with(Vec::len),
+                    move |at| {
+                        text(move || {
+                            rows.with(|rows| format!("item {} at {}", rows[at.index()], at.index()))
+                        })
+                        .h(px(32.0))
+                    },
+                )
+                .keys(move || rows.get())
+                .estimated_item_size(px(32.0))
+                .h(px(320.0)),
+            )
+    }
+
+    #[test]
+    fn a_views_keyed_list_reorders_focused_and_kept_rows_without_recreating_them() {
+        for count in [1_000, 100_000] {
+            let mut c = core();
+            c.mount_root(&Root::new::<ReorderedRows>(move || ReorderedRowsProps {
+                count: count.into(),
+            }));
+            let first = c.commit().unwrap();
+            let root = root_host(&first);
+            let focused = text_node(&first, "item 2 at 2");
+            let kept = text_node(&first, "item 7 at 7");
+            let list = first
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    MountItem::Create {
+                        id,
+                        kind: ViewKind::Scroll,
+                    } => Some(*id),
+                    _ => None,
+                })
+                .unwrap();
+            c.set_states(focused, crate::tailwind::state::FOCUSED);
+            c.set_kept(&[kept]);
+            c.set_scroll_offset(
+                list,
+                point(px(0.0), px((count as f32 - 10.0) * 32.0)),
+                u32::MAX,
+            );
+            c.commit();
+            assert!(c.component_event(root, EventKind::Press, &EventPayload::None));
+            let changed = c.commit().unwrap();
+            for (id, value, index) in [(focused, 2, count - 1), (kept, 7, count - 2)] {
+                let expected = format!("item {value} at {index}");
+                assert!(changed.items.iter().any(|item| matches!(item,
+                    MountItem::Text { id: changed, text, .. } if *changed == id && text.text == expected
+                )), "source {count}: retained {id} did not follow its key: {:?}", texts(&changed));
+                assert!(!changed.items.iter().any(
+                    |item| matches!(item, MountItem::Delete { id: deleted } if *deleted == id)
+                ));
+            }
+        }
+    }
+
     #[test]
     fn a_views_list_grows_in_place() {
         let (mut c, batch) = mailbox(3);

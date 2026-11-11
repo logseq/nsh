@@ -137,7 +137,7 @@ Rows can have different heights. Until a row has been measured, the list assumes
 
 ## Changing the data
 
-In Rust, give the count as a signal or a closure (`move || posts.with(Vec::len)`): the list grows and shrinks in place. Rows added or removed at the end need nothing more; when rows come and go elsewhere, give their identities with `.keys(move || posts.with(|p| p.iter().map(|p| p.id).collect::<Vec<_>>()))`, and the list keeps the common start and end and treats what is between as removed and inserted.
+In Rust, give the count as a signal or a closure (`move || posts.with(Vec::len)`): the list grows and shrinks in place. Rows added or removed at the end need nothing more; when rows are inserted, removed or reordered elsewhere, give stable, unique identities with `.keys(move || posts.with(|p| p.iter().map(|p| p.id).collect::<Vec<_>>()))`. Retained cells, focus and row measurements follow their keys to the new positions. Keep the key count equal to the row count.
 
 In TSX, pass a new array to change the items: `posts.set([...posts(), ...more])`. The list compares the old and the new array **by item identity** (`===`), keeps the common start and end, and treats what is between as removed and inserted.
 
