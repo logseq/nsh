@@ -138,3 +138,7 @@
   Rust `VirtualList::keys` retains cells, interaction owners and measured sizes by unique key during reorder
   (`element/virtual_list.rs::rows_change`, `ListState::reorder`). Pure insert/remove keeps the contiguous-splice
   path. The key map is built only on source changes; scrolling and property bindings do not build it.
+
+Rust row bindings read `Position::is_requested()` to distinguish native slot assignment from a spare cell's
+cached index/owner. `Core::sync_virtual_requests` updates the changed list; rebinding publishes the index
+before the request. Ordinary child positions stay requested.

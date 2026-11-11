@@ -400,13 +400,34 @@ pub(crate) type PlaceFn = Rc<dyn Fn(Child, Position) -> AnyElement>;
 pub struct Position {
     index: super::reactive::Node,
     count: super::reactive::Node,
+    requested: Option<super::reactive::Node>,
 }
 
 impl Position {
     /// The position read from signals (or memos) of the index and the
     /// count.
     pub(crate) fn of(index: super::reactive::Node, count: super::reactive::Node) -> Self {
-        Self { index, count }
+        Self {
+            index,
+            count,
+            requested: None,
+        }
+    }
+
+    pub(crate) fn with_requested(mut self, requested: super::reactive::Node) -> Self {
+        self.requested = Some(requested);
+        self
+    }
+
+    /// Whether the native virtual list currently requests this cell's row,
+    /// including overscan and retained interaction owners. A spare cell kept
+    /// for reuse returns false while its index still names its previous row.
+    /// Read it in a binding to follow assignment and release without polling.
+    /// Positions outside a Rust virtual list return true.
+    #[track_caller]
+    pub fn is_requested(&self) -> bool {
+        self.requested
+            .is_none_or(|requested| requested.with("a list cell request", |value: &bool| *value))
     }
 
     /// A position that does not change (signals of the current owner).

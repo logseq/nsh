@@ -67,8 +67,14 @@ type Rows = (u32, Option<Rc<[u64]>>);
 /// content reads, and the content's owner.
 type CellRows = Rc<RefCell<CellRowMap>>;
 
-/// The index and owner of each part of a list's cells showing a row.
-type CellRowMap = FxHashMap<NodeId, (crate::element::Signal<usize>, crate::element::Owner)>;
+/// The index, assignment and owner of each part of a list's cells.
+#[derive(Clone, Copy)]
+struct CellRow {
+    index: crate::element::Signal<usize>,
+    owner: crate::element::Owner,
+    requested: crate::element::Signal<bool>,
+}
+type CellRowMap = FxHashMap<NodeId, CellRow>;
 
 /// A component's own list.
 struct VirtualListState {
@@ -2255,19 +2261,35 @@ impl<M: TextEngine> Core<M> {
                 // The wrapper reads its position from signals.
                 let count_signal = list.map(|list| self.list_count(list, count));
                 let made = std::cell::Cell::new(None);
+                let requested = std::cell::Cell::new(None);
+                let tracks_request =
+                    list.is_some_and(|list| self.components.virtual_lists.contains_key(&list));
                 let build = || {
-                    let at = row_position(index, count, count_signal, &made);
+                    let at = row_position(
+                        index,
+                        count,
+                        count_signal,
+                        &made,
+                        tracks_request.then_some(&requested),
+                    );
                     view().child(place(Child::row(), at)).into_element().0
                 };
                 // The wrapper is the placing component's.
                 let parent = self.list_component_owner(list);
                 let el = self.build_cell(parent, inst, build);
                 inst.row_index = made.take();
-                if let (Some(list), Some(index), Some(owner)) =
-                    (list, inst.row_index, inst.cell_owner)
+                if let (Some(list), Some(index), Some(owner), Some(requested)) =
+                    (list, inst.row_index, inst.cell_owner, requested.take())
                     && let Some(state) = self.components.virtual_lists.get(&list)
                 {
-                    state.rows.borrow_mut().insert(host, (index, owner));
+                    state.rows.borrow_mut().insert(
+                        host,
+                        CellRow {
+                            index,
+                            owner,
+                            requested,
+                        },
+                    );
                 }
                 match el {
                     Ok(el) => el,
@@ -2312,8 +2334,10 @@ impl<M: TextEngine> Core<M> {
                     Some((count, row, separator, rows, scope)) => {
                         let count_signal = Some(self.list_count(list, count));
                         let made = std::cell::Cell::new(None);
+                        let requested = std::cell::Cell::new(None);
                         let build = || {
-                            let at = row_position(index, count, count_signal, &made);
+                            let at =
+                                row_position(index, count, count_signal, &made, Some(&requested));
                             let row = row(at);
                             // Between rows: after each but the last (before
                             // it, inverted), while it is not.
@@ -2336,8 +2360,17 @@ impl<M: TextEngine> Core<M> {
                         let parent = scope.unwrap_or_else(|| self.list_component_owner(Some(list)));
                         let el = self.build_cell(parent, inst, build);
                         inst.row_index = made.take();
-                        if let (Some(index), Some(owner)) = (inst.row_index, inst.cell_owner) {
-                            rows.borrow_mut().insert(host, (index, owner));
+                        if let (Some(index), Some(owner), Some(requested)) =
+                            (inst.row_index, inst.cell_owner, requested.take())
+                        {
+                            rows.borrow_mut().insert(
+                                host,
+                                CellRow {
+                                    index,
+                                    owner,
+                                    requested,
+                                },
+                            );
                         }
                         match el {
                             Ok(el) => el,
@@ -4595,9 +4628,45 @@ impl<M: TextEngine> Core<M> {
         bound
     }
 
+    /// Publishes assignment changes of this updated list only. Cached cells
+    /// keep their index and owner after release; that is not native demand.
+    pub(super) fn sync_virtual_requests(&self, list: NodeId) {
+        let Some(state) = self.components.virtual_lists.get(&list) else {
+            return;
+        };
+        let Ok(key) = self.key(list) else {
+            return;
+        };
+        let Some(native) = self.nodes[key as usize].list.as_ref() else {
+            return;
+        };
+        let _entered = self.components.runtime.enter();
+        for (slot, native) in native.slots.iter().enumerate() {
+            for part in [state.cells.get(slot), state.contents.get(slot)]
+                .into_iter()
+                .flatten()
+            {
+                let binding = state.rows.borrow().get(part).copied();
+                if let Some(binding) = binding
+                    && binding.owner.is_live()
+                {
+                    // A pending bind can still hold its previous row: its new
+                    // assignment is published with its new index below.
+                    let requested = native
+                        .index
+                        .is_some_and(|index| index as usize == binding.index.get_untracked());
+                    if binding.requested.get_untracked() != requested {
+                        binding.requested.set(requested);
+                    }
+                }
+            }
+        }
+    }
+
     fn bind_virtual_cell(&mut self, list: NodeId, slot: usize, index: usize) {
         let state = &self.components.virtual_lists[&list];
         let owner = state.owner;
+        let rows = state.rows.clone();
         let cell = match state.cells.get(slot).copied().filter(|&c| c != 0) {
             Some(cell) => {
                 let content = state.contents.get(slot).copied().filter(|&c| c != 0);
@@ -4614,6 +4683,12 @@ impl<M: TextEngine> Core<M> {
                             && inst.cell_owner.is_some_and(|o| o.is_live())
                         {
                             row.set(index);
+                            let binding = rows.borrow().get(&part).copied();
+                            if let Some(binding) = binding
+                                && !binding.requested.get_untracked()
+                            {
+                                binding.requested.set(true);
+                            }
                             continue;
                         }
                     }
@@ -6723,7 +6798,11 @@ fn dispose_rows(rows: &std::rc::Weak<RefCell<CellRowMap>>) {
     let Some(rows) = rows.upgrade() else {
         return;
     };
-    let owners: Vec<_> = rows.borrow_mut().drain().map(|(_, (_, o))| o).collect();
+    let owners: Vec<_> = rows
+        .borrow_mut()
+        .drain()
+        .map(|(_, row)| row.owner)
+        .collect();
     for owner in owners {
         owner.dispose();
     }
@@ -6738,7 +6817,7 @@ fn move_rows(cells: &CellRows, change: Option<&virtual_list::RowsChange>, count:
     let parts: Vec<_> = cells
         .borrow()
         .iter()
-        .map(|(&id, &(index, owner))| (id, index, owner))
+        .map(|(&id, row)| (id, row.index, row.owner))
         .collect();
     let mut gone = Vec::new();
     for (id, index, owner) in parts {
@@ -6771,12 +6850,20 @@ fn row_position(
     count: usize,
     count_signal: Option<crate::element::Signal<usize>>,
     made: &std::cell::Cell<Option<crate::element::Signal<usize>>>,
+    requested: Option<&std::cell::Cell<Option<crate::element::Signal<bool>>>>,
 ) -> Position {
     match count_signal {
         Some(count) => {
             let index = crate::element::signal(index);
             made.set(Some(index));
-            Position::of(index.node(), count.node())
+            let at = Position::of(index.node(), count.node());
+            if let Some(requested) = requested {
+                let signal = crate::element::signal(true);
+                requested.set(Some(signal));
+                at.with_requested(signal.node())
+            } else {
+                at
+            }
         }
         None => Position::fixed(index, count),
     }

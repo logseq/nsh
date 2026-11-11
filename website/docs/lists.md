@@ -135,6 +135,11 @@ const toggle = (id: number) =>
 
 Rows can have different heights. Until a row has been measured, the list assumes the estimated item size (default 50 points); pass a value close to your typical row so the scroll indicator and jumps to far items are accurate from the start.
 
+In Rust row bindings, `position.is_requested()` follows whether the native list currently requests the row,
+including overscan and retained focus, selection or overlay owners. It becomes `false` when a spare cell
+waits for reuse while keeping its previous index. Use it to suspend row work or release externally owned
+row content; ordinary child positions remain requested.
+
 ## Changing the data
 
 In Rust, give the count as a signal or a closure (`move || posts.with(Vec::len)`): the list grows and shrinks in place. Rows added or removed at the end need nothing more; when rows are inserted, removed or reordered elsewhere, give stable, unique identities with `.keys(move || posts.with(|p| p.iter().map(|p| p.id).collect::<Vec<_>>()))`. Retained cells, focus and row measurements follow their keys to the new positions. Keep the key count equal to the row count.

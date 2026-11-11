@@ -2879,6 +2879,8 @@ impl<M: TextEngine> Core<M> {
             if !self.bind_virtual_lists()
                 && !std::mem::take(&mut self.extent_changed)
                 && !watched
+                // Native list assignment can change row bindings during layout.
+                && self.components.patches.borrow().is_empty()
                 && !std::mem::take(&mut self.cull_made)
                 && !std::mem::take(&mut self.placeholders_resized)
                 && self.scrollbars_pending.is_empty()
@@ -9149,6 +9151,8 @@ impl<M: TextEngine> Core<M> {
                 ));
             }
         }
+
+        self.sync_virtual_requests(id);
 
         // Position cells that show their item (the window may have
         // changed which ones). Descendant frames only change when the

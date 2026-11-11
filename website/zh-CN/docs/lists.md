@@ -135,6 +135,11 @@ const toggle = (id: number) =>
 
 各行可以高度不同。在测量之前，列表假定行高为预估尺寸（默认 50 点）；传入接近典型行高的值，滚动条和跳转到远处条目从一开始就会比较准确。
 
+In Rust row bindings, `position.is_requested()` follows whether the native list currently requests the row,
+including overscan and retained focus, selection or overlay owners. It becomes `false` when a spare cell
+waits for reuse while keeping its previous index. Use it to suspend row work or release externally owned
+row content; ordinary child positions remain requested.
+
 ## 修改数据
 
 In Rust, give the count as a signal or a closure (`move || posts.with(Vec::len)`): the list grows and shrinks in place. Rows added or removed at the end need nothing more; when rows are inserted, removed or reordered elsewhere, give stable, unique identities with `.keys(move || posts.with(|p| p.iter().map(|p| p.id).collect::<Vec<_>>()))`. Retained cells, focus and row measurements follow their keys to the new positions. Keep the key count equal to the row count.

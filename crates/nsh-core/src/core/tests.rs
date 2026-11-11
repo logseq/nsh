@@ -19273,6 +19273,76 @@ mod views {
         }
     }
 
+    #[component]
+    fn RequestedRows(props: ReorderedRowsProps) -> impl IntoElement {
+        let count = props.count.get_untracked();
+        view()
+            .flex_1()
+            .child(text(format!(
+                "ordinary requested {}",
+                crate::element::Position::fixed(0, 1).is_requested()
+            )))
+            .child(
+                virtual_list(count, move |position| {
+                    text(move || {
+                        format!(
+                            "row {} requested {}",
+                            position.index(),
+                            position.is_requested()
+                        )
+                    })
+                    .h(px(32.0))
+                })
+                .estimated_item_size(px(32.0))
+                .h(px(320.0)),
+            )
+    }
+
+    #[test]
+    fn a_views_list_reports_release_of_a_cached_focused_cell_without_scrolling() {
+        for count in [1_000, 100_000] {
+            let mut c = core();
+            c.mount_root(&Root::new::<RequestedRows>(move || ReorderedRowsProps {
+                count: count.into(),
+            }));
+            let first = c.commit().unwrap();
+            assert!(texts(&first).contains(&"ordinary requested true".to_owned()));
+            let focused = text_node(&first, "row 2 requested true");
+            let list = first
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    MountItem::Create {
+                        id,
+                        kind: ViewKind::Scroll,
+                    } => Some(*id),
+                    _ => None,
+                })
+                .unwrap();
+            c.set_states(focused, crate::tailwind::state::FOCUSED);
+            c.set_scroll_offset(
+                list,
+                point(px(0.0), px((count as f32 - 10.0) * 32.0)),
+                u32::MAX,
+            );
+            let distant = c.commit().unwrap();
+            assert!(!distant.items.iter().any(|item| matches!(item,MountItem::Text {id,text,..} if *id==focused && text.text.ends_with("false"))));
+            c.set_states(focused, 0);
+            let released = c.commit().expect("a request binding reports focus release");
+            assert!(released.items.iter().any(|item| matches!(item,MountItem::Text {id,text,..} if *id==focused && text.text=="row 2 requested false")), "source {count}: released native cell still requested its cached row: {:?}", texts(&released));
+            assert!(
+                !released
+                    .items
+                    .iter()
+                    .any(|item| matches!(item,MountItem::Delete{id} if *id==focused)),
+                "pooled row was disposed instead of reporting native demand"
+            );
+            c.set_scroll_offset(list, point(px(0.0), px(0.0)), u32::MAX);
+            let returned = c.commit().unwrap();
+            assert!(returned.items.iter().any(|item| matches!(item,MountItem::Text {id,text,..} if *id==focused && text.text=="row 2 requested true")),"returning cached row lost its assignment binding");
+        }
+    }
+
     #[test]
     fn a_views_list_grows_in_place() {
         let (mut c, batch) = mailbox(3);
