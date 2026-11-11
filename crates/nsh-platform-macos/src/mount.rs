@@ -283,7 +283,9 @@ impl Mounter {
                 let before = before
                     .and_then(|b| self.views.get(&b))
                     .filter(|b| b.parent_view().as_ref() == Some(parent));
-                if child.has_parent() {
+                // Detaching a focused ancestor ends AppKit's field editing.
+                // A sibling reorder can use native repositioning in place.
+                if child.has_parent() && !child.is_in(parent) {
                     child.unparent();
                 }
                 child.insert_before(parent, before);

@@ -18,6 +18,8 @@ mod ime;
 #[cfg(target_os = "macos")]
 mod input_hidden;
 #[cfg(target_os = "macos")]
+mod keyed_focus;
+#[cfg(target_os = "macos")]
 mod menu_labels;
 #[cfg(target_os = "macos")]
 mod mount;
@@ -52,6 +54,8 @@ fn main() {
                 window_frames::run();
             } else if std::env::var_os("NSH_INPUT_HIDDEN_CHECK_ONLY").is_some() {
                 input_hidden::run();
+            } else if std::env::var_os("NSH_KEYED_FOCUS_CHECK_ONLY").is_some() {
+                keyed_focus::run();
             } else if std::env::var_os("NSH_EMBEDDED_SCROLL_CHECK_ONLY").is_some() {
                 embedded_scroll::run();
             } else if std::env::var_os("NSH_PRESS_MOMENTUM_CHECK_ONLY").is_some() {
@@ -65,6 +69,7 @@ fn main() {
                 window_frames::run();
                 ime::run();
                 input_hidden::run();
+                keyed_focus::run();
                 mount::run();
                 // Last: it makes the process an accessory app.
                 embedded_scroll::run();

@@ -2117,6 +2117,11 @@ impl NshView {
         superview(self.ns()).is_some()
     }
 
+    /// Whether it is already in the exact native container `parent` uses.
+    pub(crate) fn is_in(&self, parent: &NshView) -> bool {
+        superview(self.ns()).is_some_and(|view| std::ptr::eq(&*view, &*parent.container()))
+    }
+
     /// Its child views, bottom to top.
     pub(crate) fn child_views(&self) -> Vec<NshView> {
         self.container()
@@ -2130,6 +2135,7 @@ impl NshView {
     /// children without one; hosted native views stay above:
     /// [`first_foreign`]).
     pub(crate) fn insert_before(&self, parent: &NshView, before: Option<&NshView>) {
+        let already_here = self.is_in(parent);
         let container = parent.container();
         let above = match before {
             Some(b) => Some(Retained::from(b.ns())),
@@ -2144,8 +2150,12 @@ impl NshView {
             None => container.addSubview(self.ns()),
         }
         let inputs = self.state().input_count;
-        parent.track_inputs(inputs, true);
-        parent.adjust_waiting(self.ivars().waiting.get(), true);
+        // Repositioning a sibling keeps its subtree attached. Only a new
+        // attachment contributes its inputs and pending work to the parent.
+        if !already_here {
+            parent.track_inputs(inputs, true);
+            parent.adjust_waiting(self.ivars().waiting.get(), true);
+        }
         self.place();
         if inputs != 0 {
             crate::scroll::commit_ancestors(self);
