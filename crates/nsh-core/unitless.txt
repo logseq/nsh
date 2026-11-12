@@ -446,3 +446,5 @@ element::rows::RowAccessor::values_now ->                             # the app'
 
 style::TextStyle.line_height_em                                  # a line-height length in multiples of the element font size
 text_geometry::TextGeometry.page_scale                          # product of ancestor zoom factors, a dimensionless multiplier between typed point coordinates
+style::TextStyle.font_size_em                                     # relative font-size multiplier of the actual parent font size
+style::PropertyValue::FontSizeEm.0                                # relative font-size multiplier of the actual parent font size
