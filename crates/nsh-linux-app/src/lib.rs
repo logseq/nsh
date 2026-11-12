@@ -156,3 +156,6 @@ pub fn main() -> std::process::ExitCode {
     eprintln!("nsh-linux-app is the executable of packaged Linux apps; build it on Linux");
     std::process::ExitCode::FAILURE
 }
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests;

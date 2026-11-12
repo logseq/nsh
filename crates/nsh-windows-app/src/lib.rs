@@ -151,3 +151,6 @@ pub fn main() -> std::process::ExitCode {
     eprintln!("nsh-windows-app is the executable of packaged Windows apps; build it on Windows");
     std::process::ExitCode::FAILURE
 }
+
+#[cfg(all(test, windows))]
+mod tests;
