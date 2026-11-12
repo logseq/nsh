@@ -210,3 +210,15 @@ See [Accessibility](../docs/accessibility.md) for labels, roles and announcement
   to it, which the terminal emulator opens itself on a modified click, outside `openWith`. The Linux console
   (`TERM=linux`) shows plain text.
 - Every platform draws what the app styles.
+
+## Activation modifiers
+
+`onPressDetail({ event })` / Rust `on_press_detail` receives a
+`LinkPressDetail` containing `control`, `shift`, `platform` (Command/Super), and
+`alt` (Option/Alt). The existing native press owner emits `Open`, `Press`, then
+`PressDetail` once each. Apps using detail to navigate must handle that event
+only, rather than navigate again from `Press` or `Open`. Existing event payloads
+are unchanged. Rust exhaustive matches on `LinkEvent` must handle `PressDetail`.
+Pointer presses preserve native modifiers. Focused keyboard activation on macOS
+and Linux preserves the activating key's modifiers; accessibility activation
+has no physical key event and leaves them false.

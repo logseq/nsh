@@ -197,6 +197,7 @@ style id:docs opacity 1
 # press.
 tap text:Docs
 expect Log: open https://example.com/docs, press
+expect Press detail: false:false:false:false
 # `accessibilityLabel`: what screen readers say, and what a label finds;
 # `openWith="app"` leaves the opening to `onOpen`.
 prop id:order role link
@@ -227,6 +228,7 @@ covers [props] disabledStyle
 covers [props] hoverStyle
 covers [events] Link.onOpen
 covers [events] onPress
+covers [events] Link.onPressDetail
 # base-dialog
 tap id:case-base-dialog
 # (appearing, going away, Escape / back and swipes) are events here: the

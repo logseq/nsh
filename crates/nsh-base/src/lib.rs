@@ -176,7 +176,7 @@ pub use crate::{
     },
     dock::{DockArea, DockAreaElement, DockAreaEvent, DockAreaProps, dock_area},
     hover_card::{HoverCard, HoverCardElement, HoverCardEvent, HoverCardProps, hover_card},
-    link::{Link, LinkElement, LinkEvent, LinkOpenWith, LinkProps, link},
+    link::{Link, LinkElement, LinkEvent, LinkOpenWith, LinkPressDetail, LinkProps, link},
     menu::{
         ContextMenu, ContextMenuElement, ContextMenuProps, Menu, MenuElement, MenuEvent, MenuItem,
         MenuItemElement, MenuItemEvent, MenuItemProps, MenuList, MenuListElement, MenuListEntry,

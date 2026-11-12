@@ -169,3 +169,15 @@ const visited = signal(new Set<string>());
 - Web 把带 `href` 的链接渲染为 `<a href>`（爬虫会跟随它；按住修饰键点击或用鼠标中键点击时在新标签页中打开，右键点击显示浏览器的链接菜单），没有 `href` 的渲染为带 `role="link"` 的元素。
 - 终端：启用的链接如果 `href` 是 URL（不是应用自己的路径），其中的文字会成为指向它的 OSC 8 超链接，由终端模拟器在带修饰键的点击时自己打开，不经过 `openWith`。Linux 控制台（`TERM=linux`）显示纯文本。
 - 每个平台绘制的都是应用设置的样式。
+
+## Activation modifiers
+
+`onPressDetail({ event })` / Rust `on_press_detail` receives a
+`LinkPressDetail` containing `control`, `shift`, `platform` (Command/Super), and
+`alt` (Option/Alt). The existing native press owner emits `Open`, `Press`, then
+`PressDetail` once each. Apps using detail to navigate must handle that event
+only, rather than navigate again from `Press` or `Open`. Existing event payloads
+are unchanged. Rust exhaustive matches on `LinkEvent` must handle `PressDetail`.
+Pointer presses preserve native modifiers. Focused keyboard activation on macOS
+and Linux preserves the activating key's modifiers; accessibility activation
+has no physical key event and leaves them false.

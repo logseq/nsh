@@ -605,3 +605,46 @@ fn a_link_shows_the_pointing_hand_unless_disabled_or_the_app_says_otherwise() {
         .count();
     assert_eq!(hands, 1);
 }
+
+#[component]
+fn LinkDetails() -> impl IntoElement {
+    let presses = signal(0u32);
+    let details = signal(0u32);
+    let shift = signal(false);
+    view()
+        .child(
+            link()
+                .href("#page")
+                .open_with(LinkOpenWith::App)
+                .on_press(move || presses.update(|count| *count += 1))
+                .on_press_detail(move |event: &nsh_base::LinkPressDetail| {
+                    details.update(|count| *count += 1);
+                    shift.set(event.shift);
+                })
+                .child(text("Internal page")),
+        )
+        .child(text(move || {
+            format!(
+                "presses:{} details:{} shift:{}",
+                presses.get(),
+                details.get(),
+                shift.get()
+            )
+        }))
+}
+
+#[test]
+fn internal_link_detail_has_the_real_pointer_and_keyboard_modifiers_once() {
+    let mut app = start::<LinkDetails>();
+    app.hold_keys("shift", true).unwrap();
+    app.press("role:link[Internal page]").unwrap();
+    app.wait_for("text:presses:1 details:1 shift:true").unwrap();
+    app.hold_keys("shift", false).unwrap();
+    app.press_key("tab").unwrap();
+    app.press_key("shift+enter").unwrap();
+    app.wait_for("text:presses:2 details:2 shift:true").unwrap();
+    app.press_key("space").unwrap();
+    app.wait_for("text:presses:3 details:3 shift:false")
+        .unwrap();
+    assert!(app.screen().opened_urls().is_empty());
+}

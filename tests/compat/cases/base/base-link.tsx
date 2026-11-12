@@ -10,6 +10,7 @@ import { Text, View, signal } from "nsh";
 import { Link } from "nsh/base";
 
 function App() {
+  const detail = signal("");
   const log = signal<string[]>([]);
   const say = (s: string) => log.set([...log(), s]);
   const disabled = signal(true);
@@ -23,6 +24,7 @@ function App() {
         hoverStyle={{ opacity: 0.5 }}
         onOpen={({ href }) => say(`open ${href}`)}
         onPress={() => say("press")}
+        onPressDetail={({ event }) => detail.set(`${event.control}:${event.shift}:${event.platform}:${event.alt}`)}
       >
         <Text>Docs</Text>
       </Link>
@@ -46,6 +48,7 @@ function App() {
         <Text>Archived</Text>
       </Link>
       <Text>{`Log: ${log().join(", ")}`}</Text>
+      <Text>{`Press detail: ${detail()}`}</Text>
       <View testID="enable" onPress={() => disabled.set(!disabled())} style={{ height: 20 }} />
       <Link testID="help" href="/help" openWith="app" hitSlop={wide() ? { top: 4, left: 2 } : 12} onPress={() => wide.set(!wide())}>
         <Text>Help</Text>
