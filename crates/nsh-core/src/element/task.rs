@@ -192,6 +192,12 @@ pub(crate) enum Action {
     /// Measures the node with the layout of the commit the action goes out
     /// with; the measurement resolves the slot.
     Measure(NodeId, AnswerSlot<Option<crate::Measurement>>),
+    /// Reads the text geometry after this commit's final text layout.
+    TextGeometry(
+        NodeId,
+        crate::TextGeometryQuery,
+        AnswerSlot<Option<crate::TextGeometry>>,
+    ),
     /// Measures where the list's viewport starts among its rows with the
     /// layout of the commit the action goes out with; the position
     /// resolves the slot.

@@ -165,3 +165,33 @@
 
 See also the text pitfalls in [pitfalls.md](pitfalls.md) and the engines in `crates/nsh-platform-ios/src/text.rs` /
 `crates/nsh-platform-android/src/text.rs`.
+
+## Committed text geometry in Rust
+
+`ElementRef::text_geometry(TextGeometryQuery)` is a read-only query of a retained
+text block's final layout. It resolves after the same commit's text changes and
+uses the layout and attributed text sent together in `MountItem::Text`. `Caret`,
+`Range`, `HitTest` and `Lines` delegate to the running `TextEngine`; their precision
+is the engine's existing precision. The query does no shaping, view creation,
+focus change or platform command. Nested text spans use the containing block's
+layout and the UTF-16 ranges in the returned `text.test_ids`.
+
+Positions and ranges use UTF-16 offsets into the returned `text.text`. Invalid
+scalar boundaries (including the middle of a surrogate pair), reversed or
+out-of-bounds ranges and non-finite hit points return `None`. Wrap affinity and
+bidirectional range splits are preserved. Atomic attachment positions and hidden
+span offsets are those of the returned attributed snapshot. Detached, disposed,
+culled, hidden and unlaid-out text blocks return `None`.
+
+The result carries the text block's ordinary `measurement`, its `content` box,
+and ancestor scroll `page_scale`. A geometry point `p` maps to the root view as
+`measurement.page + (content.origin + p) * page_scale`; these are the same layout
+coordinates as `measure()`, with transforms and native animation outside the
+snapshot. `Lines` returns the engine's visual line metrics with empty `text`
+fields, allowing callers to use UTF-16 ranges without copying line strings.
+
+The answer retains the exact immutable attributed snapshot, rather than a second
+layout or document model. An application keeps its source revision and target
+identity across the asynchronous query and drops the answer after a later edit,
+graph switch, disposal or remount. An old answer continues to describe its old
+snapshot; it does not become the geometry of later text.

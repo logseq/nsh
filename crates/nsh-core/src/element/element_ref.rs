@@ -425,6 +425,33 @@ impl ElementRef {
         answer
     }
 
+    /// Queries the final attributed text layout sent to the platform by the
+    /// commit this call goes out with. Coordinates in the query and result
+    /// are relative to the text content box; the answer includes that box
+    /// and the element's root-view position for conversion.
+    ///
+    /// `None` means the ref is detached, disposed, culled, not a laid-out
+    /// text block, or the query contains an invalid UTF-16 boundary or
+    /// non-finite point. Nested inline spans name their containing text's
+    /// ranges through `answer.text.test_ids`; query the block's ref.
+    /// Await it in a task. The answer owns the exact attributed snapshot:
+    /// consumers retain their own source revision across the await and
+    /// discard answers after an edit, remount or disposal.
+    pub fn text_geometry(
+        &self,
+        query: crate::TextGeometryQuery,
+    ) -> Answer<Option<crate::TextGeometry>> {
+        let (answer, slot) = Answer::new();
+        let pending = slot.clone();
+        if self
+            .reach(|node, executor| executor.act(Action::TextGeometry(node, query, pending)))
+            .is_none()
+        {
+            slot.borrow_mut().deliver(None);
+        }
+        answer
+    }
+
     /// Where a list's viewport starts among its rows (TS:
     /// `ref.measureScrollPosition()`): the row there and how far into it,
     /// as the list lays its rows out, from the layout of the commit this
@@ -605,6 +632,31 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    #[test]
+    fn text_geometry_on_an_unbound_or_disposed_ref_resolves_without_an_action() {
+        use std::{
+            future::Future,
+            pin::Pin,
+            task::{Context, Poll, Waker},
+        };
+        let runtime = Runtime::default();
+        let _entered = runtime.enter();
+        let executor = Rc::new(Executor::default());
+        let (owner, field) = create_root(|| ElementRef::new(&executor));
+        for dispose in [false, true] {
+            if dispose {
+                owner.dispose();
+            }
+            let mut answer = field.text_geometry(crate::TextGeometryQuery::Lines);
+            let mut context = Context::from_waker(Waker::noop());
+            assert!(matches!(
+                Pin::new(&mut answer).poll(&mut context),
+                Poll::Ready(None)
+            ));
+            assert!(executor.take_actions().is_empty());
+        }
     }
 
     #[test]

@@ -452,6 +452,19 @@ pub fn Quote(props: QuoteProps) -> impl IntoElement {
 `TextView` in `nsh/base` is built this way: its `renderCodeBlock`, `renderMath`, ... are render functions, and its
 `classes` are the app's classes by part ([TextView](../elements/text-view.md)).
 
+## Reading committed text geometry
+
+Rust components can await `ElementRef::text_geometry(TextGeometryQuery)` on a
+retained text block. `Caret`, `Range`, `HitTest` and `Lines` read its final
+attributed layout from the running text engine after the turn's changes. The
+answer includes the exact attributed snapshot and its span identities, the
+content box, root-view measurement and ancestor scroll scale. UTF-16 positions
+preserve wrap affinity, surrogate boundaries and the engine's bidirectional
+range boxes. Keep the application's source revision and retained target across
+the await, and discard an answer after either changes. See the Rust API docs for
+`TextGeometryQuery`, `TextGeometryResult` and `TextGeometry` for coordinates and
+availability.
+
 ## Testing
 
 A Rust app's tests run it headless, in `cargo test` or in `nsh test`, with the same driver: on the real engine,

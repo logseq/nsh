@@ -19,6 +19,8 @@ mod sticky;
 mod terminal_layout;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod text_geometry_tests;
 mod touch;
 mod views;
 mod watch;
@@ -3123,6 +3125,9 @@ impl<M: TextEngine> Core<M> {
         // The components' measurements, with this commit's layout as JS's.
         for (id, answer) in std::mem::take(&mut self.components.measures) {
             answer.borrow_mut().deliver(self.measure(id));
+        }
+        for (id, query, answer) in std::mem::take(&mut self.components.text_geometries) {
+            answer.borrow_mut().deliver(self.text_geometry(id, query));
         }
         for (id, answer) in std::mem::take(&mut self.components.scroll_positions) {
             answer.borrow_mut().deliver(self.list_scroll_position(id));

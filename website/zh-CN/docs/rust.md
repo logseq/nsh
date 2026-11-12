@@ -407,6 +407,19 @@ pub fn Quote(props: QuoteProps) -> impl IntoElement {
 
 `nsh/base` 中的 `TextView` 就是这样构建的：它的 `renderCodeBlock`、`renderMath` 等是渲染函数，它的 `classes` 是应用按部件给出的类（[TextView](../elements/text-view.md)）。
 
+## Reading committed text geometry
+
+Rust components can await `ElementRef::text_geometry(TextGeometryQuery)` on a
+retained text block. `Caret`, `Range`, `HitTest` and `Lines` read its final
+attributed layout from the running text engine after the turn's changes. The
+answer includes the exact attributed snapshot and its span identities, the
+content box, root-view measurement and ancestor scroll scale. UTF-16 positions
+preserve wrap affinity, surrogate boundaries and the engine's bidirectional
+range boxes. Keep the application's source revision and retained target across
+the await, and discard an answer after either changes. See the Rust API docs for
+`TextGeometryQuery`, `TextGeometryResult` and `TextGeometry` for coordinates and
+availability.
+
 ## 测试
 
 Rust 应用的测试以无界面方式运行它，可以在 `cargo test` 中，也可以在 `nsh test` 中，使用同一个驱动：运行在真实的引擎上，没有窗口，以

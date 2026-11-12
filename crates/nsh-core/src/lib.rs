@@ -65,6 +65,8 @@ mod style;
 pub mod svg;
 pub mod tailwind;
 mod text;
+mod text_geometry;
+pub use text_geometry::{TextGeometry, TextGeometryQuery, TextGeometryResult};
 pub mod text_edit;
 pub mod time;
 mod transform;

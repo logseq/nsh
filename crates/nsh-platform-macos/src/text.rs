@@ -3438,6 +3438,89 @@ mod selection_menu {
 #[cfg(test)]
 mod hit_regressions {
     use super::*;
+
+    #[test]
+    fn committed_text_geometry_queries_the_mounted_coretext_layout() {
+        use std::{rc::Rc, sync::Arc};
+
+        use nsh_core::{
+            Core, MountItem, Op, ROOT_ID, Tag, TextGeometryQuery as Q, TextGeometryResult as R,
+        };
+        let engine = Rc::new(CoreTextEngine::default());
+        let mut core = Core::new(engine.clone(), Size::new(Points(90.0), Points(480.0)));
+        for op in [
+            Op::Create {
+                id: 2,
+                tag: Tag::Text,
+            },
+            Op::CreateText {
+                id: 3,
+                text: "a😀e\u{301} אבג abc def ghi jkl".into(),
+            },
+            Op::Insert {
+                parent: 2,
+                child: 3,
+                before: None,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ] {
+            core.apply(op).unwrap();
+        }
+        let batch = core.commit().unwrap();
+        let (text, layout) = batch
+            .items
+            .iter()
+            .find_map(|item| match item {
+                MountItem::Text {
+                    id: 2,
+                    text,
+                    layout,
+                    ..
+                } => Some((text, layout)),
+                _ => None,
+            })
+            .unwrap();
+        let answer = core.text_geometry(2, Q::Lines).unwrap();
+        assert!(Arc::ptr_eq(text, &answer.text));
+        assert_eq!(answer.result, R::Lines(engine.lines(layout)));
+        let R::Lines(lines) = answer.result else {
+            panic!("visual lines")
+        };
+        assert!(
+            lines.len() > 1,
+            "the real engine wraps at the mounted width"
+        );
+        let wrap = lines[0].end;
+        for affinity in [Affinity::Upstream, Affinity::Downstream] {
+            let position = TextPosition::new(wrap, affinity);
+            assert_eq!(
+                core.text_geometry(2, Q::Caret(position)).unwrap().result,
+                R::Caret(engine.caret_rect(layout, position))
+            );
+        }
+        let range = 1..text.text.encode_utf16().count() as u32;
+        let mut expected = Vec::new();
+        engine.range_rects(layout, range.clone(), &mut expected);
+        assert!(!expected.is_empty());
+        assert_eq!(
+            core.text_geometry(2, Q::Range(range)).unwrap().result,
+            R::Range(expected)
+        );
+        let p = Point::new(Points(15.0), Points(5.0));
+        assert_eq!(
+            core.text_geometry(2, Q::HitTest(p)).unwrap().result,
+            R::HitTest(engine.hit_test(layout, p))
+        );
+        assert!(
+            core.text_geometry(2, Q::Caret(TextPosition::new(2, Affinity::Downstream)))
+                .is_none()
+        );
+    }
+
     fn layout(text: &str, ellipsize: Option<EllipsizeMode>) -> (CoreTextEngine, TextLayout) {
         let engine = CoreTextEngine::default();
         let mut text_value = AttributedText::default();

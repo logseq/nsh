@@ -682,6 +682,12 @@ pub(super) struct Components {
     /// Elements to measure once this commit is laid out
     /// ([`crate::element::ElementRef::measure`]).
     pub(super) measures: Vec<(NodeId, AnswerSlot<Option<crate::Measurement>>)>,
+    /// Read-only queries over the final text layout of this commit.
+    pub(super) text_geometries: Vec<(
+        NodeId,
+        crate::TextGeometryQuery,
+        AnswerSlot<Option<crate::TextGeometry>>,
+    )>,
     /// Lists to tell where their viewports start once this commit is laid
     /// out ([`crate::element::ElementRef::measure_scroll_position`]).
     pub(super) scroll_positions: Vec<(NodeId, AnswerSlot<Option<crate::ListScrollPosition>>)>,
@@ -796,6 +802,7 @@ impl Default for Components {
             next_fetch: 1,
             animations: FxHashMap::default(),
             measures: Vec::new(),
+            text_geometries: Vec::new(),
             scroll_positions: Vec::new(),
             transition_times: Vec::new(),
             presses: Vec::new(),
@@ -5766,6 +5773,9 @@ impl<M: TextEngine> Core<M> {
                 self.set_builtin_scrollbars(theme.map(|theme| (source, theme)))
             }
             Action::Measure(id, answer) => self.components.measures.push((id, answer)),
+            Action::TextGeometry(id, query, answer) => {
+                self.components.text_geometries.push((id, query, answer))
+            }
             Action::MeasureScrollPosition(id, answer) => {
                 self.components.scroll_positions.push((id, answer))
             }
