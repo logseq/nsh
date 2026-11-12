@@ -280,7 +280,16 @@ fn run_with_background(background: bool) {
             !app.isActive(),
             "start the background probe in a fresh inactive process"
         );
-        assert!(app.setActivationPolicy(NSApplicationActivationPolicy::Prohibited));
+        let before = app.activationPolicy();
+        let requested = (before != NSApplicationActivationPolicy::Prohibited)
+            .then(|| app.setActivationPolicy(NSApplicationActivationPolicy::Prohibited));
+        // The state is authoritative: an already prohibited app needs no change.
+        // Report one bounded diagnostic before any native view is constructed.
+        eprintln!(
+            "background keyed focus: policy before={before:?}, request={requested:?}, actual={:?}, active={}",
+            app.activationPolicy(),
+            app.isActive(),
+        );
     } else {
         app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
     }
