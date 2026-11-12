@@ -167,7 +167,7 @@ fn committed_text_geometry_rejects_invalid_boundaries_and_non_finite_points() {
         Q::Caret(TextPosition::new(10, Affinity::Downstream)),
         Q::Range(2..3),
         Q::Range(0..2),
-        Q::Range(5..4),
+        Q::Range(std::ops::Range { start: 5, end: 4 }),
         Q::Range(0..10),
         Q::HitTest(point(px(f32::NAN), px(0.0))),
         Q::HitTest(point(px(0.0), px(f32::INFINITY))),
