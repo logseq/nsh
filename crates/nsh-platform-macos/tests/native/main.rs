@@ -41,6 +41,11 @@ fn main() {
     } else {
         #[cfg(target_os = "macos")]
         {
+            // This explicit mode must precede every check that may activate.
+            if std::env::var_os("NSH_KEYED_FOCUS_BACKGROUND_ONLY").is_some() {
+                keyed_focus::run_background();
+                return;
+            }
             if mount::bench_only() {
                 mount::bench_alone();
             } else if std::env::var_os("NSH_MENU_LABELS_CHECK_ONLY").is_some() {

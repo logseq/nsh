@@ -1,6 +1,8 @@
 //! A native input's keyed ancestor moves during its own change callback.
 //! AppKit's field editor, selection and both input views must survive the move;
-//! the next hardware character reaches the same input without focusing it again.
+//! the next window-local native key event reaches it without focusing again.
+//! Background-only mode keeps the app prohibited from activating and the window
+//! non-key, while retaining the same actual field-editor assertions.
 
 use std::{
     sync::{
@@ -137,7 +139,29 @@ fn character(window: &NSWindow, value: &str, code: u16) {
     }
 }
 
-fn check(mtm: MainThreadMarker, holder: usize, hosted: bool) {
+fn assert_background(mtm: MainThreadMarker, window: Option<&NSWindow>, background: bool) {
+    if !background {
+        return;
+    }
+    let app = NSApplication::sharedApplication(mtm);
+    assert_eq!(
+        app.activationPolicy(),
+        NSApplicationActivationPolicy::Prohibited
+    );
+    assert!(
+        !app.isActive(),
+        "the keyed focus probe never activates its app"
+    );
+    if let Some(window) = window {
+        assert!(
+            !window.isKeyWindow(),
+            "the probe never takes the global keyboard focus"
+        );
+    }
+}
+
+fn check(mtm: MainThreadMarker, holder: usize, hosted: bool, background: bool) {
+    assert_background(mtm, None, background);
     HOLDER.store(holder, Ordering::SeqCst);
     ARMED.store(false, Ordering::SeqCst);
     CHANGES.lock().unwrap().clear();
@@ -156,7 +180,13 @@ fn check(mtm: MainThreadMarker, holder: usize, hosted: bool) {
     let surface = platform::AppView::new(mtm, platform::AppOptions::default());
     window.setContentView(Some(&surface.view()));
     surface.load(platform::App::Rust(platform::Root::of::<Fields>()));
-    window.makeKeyAndOrderFront(None);
+    if background {
+        // The public nonactivating path also used by NSH's background runner.
+        window.orderFrontRegardless();
+    } else {
+        window.makeKeyAndOrderFront(None);
+    }
+    assert_background(mtm, Some(&window), background);
     let root = surface.view();
     until("both keyed inputs", || find(&root, "field-2").is_some());
     let first_row = find(&root, "row-1").unwrap();
@@ -176,12 +206,12 @@ fn check(mtm: MainThreadMarker, holder: usize, hosted: bool) {
     let field = native_field.downcast_ref::<NSTextField>().unwrap();
     assert!(window.makeFirstResponder(Some(field)));
     let editor = field.currentEditor().expect("the active field editor");
+    assert_background(mtm, Some(&window), background);
     editor.setSelectedRange(NSRange::new(2, 0));
     character(&window, "z", 6);
-    until("the hardware-key control before reorder", || {
-        changed("abzcd")
-    });
+    until("the native-key control before reorder", || changed("abzcd"));
     assert_eq!(editor.selectedRange(), NSRange::new(3, 0));
+    assert_background(mtm, Some(&window), background);
 
     ARMED.store(true, Ordering::SeqCst);
     character(&window, "q", 12);
@@ -189,6 +219,7 @@ fn check(mtm: MainThreadMarker, holder: usize, hosted: bool) {
         rows(&parent) == ["row-2", "row-1"]
     });
     assert!(changed("abzqcd"));
+    assert_background(mtm, Some(&window), background);
     for (id, before) in [
         ("row-1", &first_row),
         ("row-2", &second_row),
@@ -225,21 +256,44 @@ fn check(mtm: MainThreadMarker, holder: usize, hosted: bool) {
         changed("abzqxcd")
     });
     assert_eq!(editor.selectedRange(), NSRange::new(5, 0));
+    assert_background(mtm, Some(&window), background);
     surface.stop();
     window.close();
+    assert_background(mtm, None, background);
 }
 
 pub(super) fn run() {
+    run_with_background(false);
+}
+
+/// Runs only this probe in a fresh process, without activation or global input.
+/// No alternate input or field-editor fallback is used if AppKit refuses it.
+pub(super) fn run_background() {
+    run_with_background(true);
+}
+
+fn run_with_background(background: bool) {
     let mtm = MainThreadMarker::new().expect("the process main thread");
     let app = NSApplication::sharedApplication(mtm);
-    app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
+    if background {
+        assert!(
+            !app.isActive(),
+            "start the background probe in a fresh inactive process"
+        );
+        assert!(app.setActivationPolicy(NSApplicationActivationPolicy::Prohibited));
+    } else {
+        app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
+    }
+    assert_background(mtm, None, background);
     app.finishLaunching();
+    assert_background(mtm, None, background);
     for holder in 0..4 {
         for hosted in [false, true] {
-            check(mtm, holder, hosted);
+            check(mtm, holder, hosted, background);
         }
     }
+    assert_background(mtm, None, background);
     println!(
-        "keyed focus: native editor identity, selection and hardware typing survive ancestor reorders"
+        "keyed focus: native editor identity, selection and window-local native key input survive ancestor reorders (background={background})"
     );
 }
