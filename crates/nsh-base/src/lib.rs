@@ -146,7 +146,9 @@ pub use crate::{
         CarouselPreviousElement, CarouselProps, carousel, carousel_content, carousel_item,
         carousel_next, carousel_pagination, carousel_pagination_item, carousel_previous,
     },
-    checkbox::{Checkbox, CheckboxElement, CheckboxEvent, CheckboxProps, checkbox},
+    checkbox::{
+        Checkbox, CheckboxChangeDetail, CheckboxElement, CheckboxEvent, CheckboxProps, checkbox,
+    },
     collapsible::{Collapsible, CollapsibleElement, CollapsibleProps, collapsible},
     color_picker::{
         ColorArea, ColorAreaElement, ColorAreaProps, ColorChannel, ColorEyeDropper,
@@ -174,7 +176,7 @@ pub use crate::{
     },
     dock::{DockArea, DockAreaElement, DockAreaEvent, DockAreaProps, dock_area},
     hover_card::{HoverCard, HoverCardElement, HoverCardEvent, HoverCardProps, hover_card},
-    link::{Link, LinkElement, LinkEvent, LinkOpenWith, LinkProps, link},
+    link::{Link, LinkElement, LinkEvent, LinkOpenWith, LinkPressDetail, LinkProps, link},
     menu::{
         ContextMenu, ContextMenuElement, ContextMenuProps, Menu, MenuElement, MenuEvent, MenuItem,
         MenuItemElement, MenuItemEvent, MenuItemProps, MenuList, MenuListElement, MenuListEntry,

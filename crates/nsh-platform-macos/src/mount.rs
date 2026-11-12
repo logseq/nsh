@@ -283,7 +283,9 @@ impl Mounter {
                 let before = before
                     .and_then(|b| self.views.get(&b))
                     .filter(|b| b.parent_view().as_ref() == Some(parent));
-                if child.has_parent() {
+                // Detaching a focused ancestor ends AppKit's field editing.
+                // A sibling reorder can use native repositioning in place.
+                if child.has_parent() && !child.is_in(parent) {
                     child.unparent();
                 }
                 child.insert_before(parent, before);
@@ -306,6 +308,7 @@ impl Mounter {
             MountItem::Delete { id } => {
                 crate::file_drop::deleted(surface, *id);
                 if let Some(view) = self.views.remove(id) {
+                    crate::text_input::deleted(&view);
                     crate::native::deleted(surface, &view);
                     crate::shader::deleted(surface, &view);
                     // A view whose parent the batch deletes too stays in it:
@@ -409,13 +412,13 @@ impl Mounter {
             } => {
                 if let Some(view) = self.get(*id) {
                     let old = view.state().text.as_ref().map(|t| t.text.clone());
-                    let same = crate::text::draws_the_same(view, text, layout, *content);
+                    let damage = crate::text::damage(view, text, layout, *content);
                     crate::text::set(view, text, layout, *content);
                     if let Some(old) = old {
                         crate::transition::text_changed(surface, view, &old, text);
                     }
-                    if !same {
-                        self.draw_when_shown(view, Damage::All);
+                    if damage != Damage::None {
+                        self.draw_when_shown(view, damage);
                     }
                     crate::access::text_changed(view);
                 }

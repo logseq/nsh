@@ -893,6 +893,9 @@ pub struct TextStyle {
     pub color: Option<Color>,
     /// Font size.
     pub font_size: Option<Points>,
+    /// Font size as a multiple of the enclosing node's resolved font size.
+    /// Resolved before this node's line height and letter spacing.
+    pub font_size_em: Option<f32>,
     /// Font weight, `100..=900`.
     pub font_weight: Option<u16>,
     /// Line height.
@@ -1668,7 +1671,7 @@ style_keys! {
     Opacity = "opacity": View "number | AnimatedNode",
     Overflow = "overflow": View "\"visible\" | \"hidden\"",
     Color = "color": Text "ColorValue | AnimatedNode",
-    FontSize = "fontSize": Text "number",
+    FontSize = "fontSize": Text "number | `${number}em`",
     FontWeight = "fontWeight": Text "\"normal\" | \"bold\" | number | `${number}`" "`\"normal\"` (400), `\"bold\"` (700) or 100–900.",
     LineHeight = "lineHeight": Text "number",
     FontFamily = "fontFamily": Text "string" "A system family or the name an imported font (`import Inter from \"./Inter.ttf\"`) evaluates to, or a list of them as CSS writes it, most preferred first (`\"Brand, 'Noto Sans SC', sans-serif\"`): characters the first lacks come from the next that has them.",
@@ -1812,6 +1815,8 @@ pub enum PropertyValue {
     Transform(Box<[(TransformKind, f32, Option<crate::animation::NodeId>)]>),
     /// `transformOrigin`.
     TransformOrigin(TransformOrigin),
+    /// `fontSize` relative to the enclosing node's resolved font size.
+    FontSizeEm(OrderedFloat<f32>),
     /// `fontWeight`.
     FontWeight(Option<u16>),
     /// `lineHeight`.
@@ -1897,7 +1902,9 @@ impl std::hash::Hash for PropertyValue {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         std::mem::discriminant(self).hash(state);
         match self {
-            PropertyValue::Number(n) | PropertyValue::Ms(n) => n.hash(state),
+            PropertyValue::Number(n) | PropertyValue::Ms(n) | PropertyValue::FontSizeEm(n) => {
+                n.hash(state)
+            }
             PropertyValue::Points(p) => OrderedFloat(p.0).hash(state),
             PropertyValue::OptPoints(p) => p.map(|p| OrderedFloat(p.0)).hash(state),
             PropertyValue::Color(c) => c.hash(state),
@@ -2743,6 +2750,9 @@ impl StyleKey {
             (K::PaddingStart | K::PaddingEnd, len) => PropertyValue::OptLp(Some(len.lp()?)),
             (K::LineHeight, Len::Px(n)) => PropertyValue::LineHeight(LineHeight::Points(px(n))),
             (K::LineHeight, Len::Pct(f)) => PropertyValue::LineHeight(LineHeight::Em(f)),
+            (K::FontSize, Len::Pct(f)) if f.is_finite() && f >= 0.0 => {
+                PropertyValue::FontSizeEm(f.into())
+            }
             (key, Len::Px(n)) => key.number_value(n)?,
             _ => return Err(StyleError::InvalidValue),
         })
@@ -2907,8 +2917,16 @@ impl StyleKey {
             | K::BorderTopLeftRadius
             | K::BorderTopRightRadius
             | K::BorderBottomRightRadius
-            | K::BorderBottomLeftRadius
-            | K::FontSize => PropertyValue::OptPoints(opt_points(value)?),
+            | K::BorderBottomLeftRadius => PropertyValue::OptPoints(opt_points(value)?),
+            K::FontSize => match value {
+                StyleValue::Str(s) if s.ends_with("em") && !s.ends_with("rem") => {
+                    let n = css::number(&s[..s.len() - 2])
+                        .filter(|n| n.is_finite() && *n >= 0.0)
+                        .ok_or(StyleError::InvalidValue)?;
+                    PropertyValue::FontSizeEm(n.into())
+                }
+                v => PropertyValue::OptPoints(opt_points(v)?),
+            },
             K::BorderRadius => PropertyValue::Points(px(number(value, 0.0)?)),
             K::BorderStyle | K::OutlineStyle => {
                 // `none` (and `hidden`) draws and lays out no line whatever
@@ -3699,7 +3717,14 @@ impl Style {
             (K::Stroke, V::Paint(v)) => self.paint.stroke = *v,
             (K::StrokeWidth, V::OptPoints(v)) => self.paint.stroke_width = *v,
             (K::StrokeDasharray, V::Dashes(v)) => self.paint.stroke_dasharray = v.clone(),
-            (K::FontSize, V::OptPoints(v)) => self.text.font_size = *v,
+            (K::FontSize, V::OptPoints(v)) => {
+                self.text.font_size = *v;
+                self.text.font_size_em = None;
+            }
+            (K::FontSize, V::FontSizeEm(n)) if n.0.is_finite() && n.0 >= 0.0 => {
+                self.text.font_size = None;
+                self.text.font_size_em = Some(n.0);
+            }
             (K::FontWeight, V::FontWeight(v)) => self.text.font_weight = *v,
             (K::LineHeight, V::LineHeight(v)) => {
                 let t = &mut self.text;
@@ -4091,6 +4116,45 @@ mod tests {
         );
         assert_eq!(a, b);
         assert_eq!(hash(&a), hash(&b));
+    }
+
+    #[test]
+    fn relative_font_sizes_share_typed_string_and_length_semantics() {
+        let key = StyleKey::FontSize;
+        let relative = key.parse_value(StyleValue::Str("1.5em")).unwrap();
+        assert_eq!(relative, PropertyValue::FontSizeEm(1.5.into()));
+        assert_eq!(
+            key.length_value(crate::geometry::relative(1.5).into())
+                .unwrap(),
+            relative
+        );
+        let mut style = Style::default();
+        style.apply_value(key, &relative).unwrap();
+        assert_eq!(style.text.font_size, None);
+        assert_eq!(style.text.font_size_em, Some(1.5));
+        style
+            .apply_value(key, &PropertyValue::OptPoints(Some(px(20.0))))
+            .unwrap();
+        assert_eq!(style.text.font_size, Some(px(20.0)));
+        assert_eq!(style.text.font_size_em, None);
+        style.apply_value(key, &relative).unwrap();
+        style.apply_value(key, &PropertyValue::Default).unwrap();
+        assert_eq!(style.text.font_size, None);
+        assert_eq!(style.text.font_size_em, None);
+        for value in ["-1em", "NaNem", "infem", "1e100em"] {
+            assert!(key.parse_value(StyleValue::Str(value)).is_err(), "{value}");
+        }
+        for ratio in [-1.0, f32::INFINITY, f32::NAN] {
+            assert!(
+                style
+                    .apply_value(key, &PropertyValue::FontSizeEm(ratio.into()))
+                    .is_err()
+            );
+        }
+        assert!(
+            key.length_value(crate::geometry::relative(-1.0).into())
+                .is_err()
+        );
     }
 
     #[test]

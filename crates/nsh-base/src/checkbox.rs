@@ -54,6 +54,26 @@ pub struct CheckboxProps {
     pub children: Prop<Children>,
 }
 
+/// The checkbox's requested value and the keys held for its activation.
+/// This is produced by the same native press that reports `Change(bool)`.
+/// Pointer events carry native modifiers; focused keyboard activation on macOS
+/// and Linux carries the activating key's modifiers. Accessibility activation
+/// has no physical key event and leaves modifiers false.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, JsObject)]
+#[non_exhaustive]
+pub struct CheckboxChangeDetail {
+    /// The requested next value. The application still owns `checked`.
+    pub checked: bool,
+    /// Shift was held.
+    pub shift: bool,
+    /// Control was held.
+    pub control: bool,
+    /// Option (Apple platforms) or Alt was held.
+    pub alt: bool,
+    /// Command (Apple platforms) or the Super key was held.
+    pub platform: bool,
+}
+
 /// The events of a [`Checkbox`].
 #[derive(Debug, Clone, PartialEq, Event)]
 pub enum CheckboxEvent {
@@ -62,6 +82,11 @@ pub enum CheckboxEvent {
     /// from checked.
     #[args(checked)]
     Change(bool),
+    /// The same proposal with the real pointer or keyboard activation's
+    /// modifier keys. Each handler receives one notification per activation;
+    /// applications subscribing to both apply the state change only once.
+    #[args(event)]
+    ChangeDetail(CheckboxChangeDetail),
 }
 
 /// A control that is checked, unchecked or indeterminate (an option, an
@@ -103,9 +128,17 @@ pub fn Checkbox(props: CheckboxProps, cx: Scope<CheckboxEvent>) -> impl IntoElem
         .checked_style(props.checked_style)
         .indeterminate_style(props.indeterminate_style)
         .hit_slop(props.hit_slop)
-        .on_press(move |_: &()| {
+        .on_press(move |press: &nsh_core::PressEvent| {
             let next = indeterminate.get_untracked() || !checked.get_untracked();
-            cx.emit(CheckboxEvent::Change(next))
+            let detail = CheckboxChangeDetail {
+                checked: next,
+                shift: press.modifiers.shift,
+                control: press.modifiers.ctrl,
+                alt: press.modifiers.alt,
+                platform: press.modifiers.cmd,
+            };
+            cx.emit(CheckboxEvent::Change(next));
+            cx.emit(CheckboxEvent::ChangeDetail(detail));
         })
         .when(terminal, |v| v.flex_row())
         .child(match terminal {

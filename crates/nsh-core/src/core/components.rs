@@ -67,8 +67,14 @@ type Rows = (u32, Option<Rc<[u64]>>);
 /// content reads, and the content's owner.
 type CellRows = Rc<RefCell<CellRowMap>>;
 
-/// The index and owner of each part of a list's cells showing a row.
-type CellRowMap = FxHashMap<NodeId, (crate::element::Signal<usize>, crate::element::Owner)>;
+/// The index, assignment and owner of each part of a list's cells.
+#[derive(Clone, Copy)]
+struct CellRow {
+    index: crate::element::Signal<usize>,
+    owner: crate::element::Owner,
+    requested: crate::element::Signal<bool>,
+}
+type CellRowMap = FxHashMap<NodeId, CellRow>;
 
 /// A component's own list.
 struct VirtualListState {
@@ -649,6 +655,10 @@ pub(super) struct Components {
     /// The language the app asked to show in (`Some(None)`: the user's
     /// again), for the engine ([`Core::take_locale_request`]).
     pub(super) locale_request: Option<Option<crate::platform::Locale>>,
+    /// The app listened to quit requests at the last commit: the platform
+    /// was told its quit requests go to the app
+    /// ([`crate::desktop::DesktopCommand::SetQuitOnRequest`]).
+    asks_quit: bool,
     /// Functions for the platform's main thread, for the engine
     /// ([`Core::take_main_thread_tasks`]).
     main_thread: Vec<crate::main_thread::MainThreadTask>,
@@ -672,6 +682,12 @@ pub(super) struct Components {
     /// Elements to measure once this commit is laid out
     /// ([`crate::element::ElementRef::measure`]).
     pub(super) measures: Vec<(NodeId, AnswerSlot<Option<crate::Measurement>>)>,
+    /// Read-only queries over the final text layout of this commit.
+    pub(super) text_geometries: Vec<(
+        NodeId,
+        crate::TextGeometryQuery,
+        AnswerSlot<Option<crate::TextGeometry>>,
+    )>,
     /// Lists to tell where their viewports start once this commit is laid
     /// out ([`crate::element::ElementRef::measure_scroll_position`]).
     pub(super) scroll_positions: Vec<(NodeId, AnswerSlot<Option<crate::ListScrollPosition>>)>,
@@ -762,6 +778,7 @@ impl Default for Components {
             url_opens: FxHashMap::default(),
             url_requests: Vec::new(),
             locale_request: None,
+            asks_quit: false,
             main_thread: Vec::new(),
             next_url_open: 0,
             screen_colors: FxHashMap::default(),
@@ -785,6 +802,7 @@ impl Default for Components {
             next_fetch: 1,
             animations: FxHashMap::default(),
             measures: Vec::new(),
+            text_geometries: Vec::new(),
             scroll_positions: Vec::new(),
             transition_times: Vec::new(),
             presses: Vec::new(),
@@ -1282,6 +1300,37 @@ impl<M: TextEngine> Core<M> {
         }
         self.apply_actions();
         self.quit_pending()
+    }
+
+    /// The user asked to quit while the app listens to quit requests:
+    /// each listener hears it, oldest first.
+    fn quit_requested(&mut self) {
+        let _entered = self.components.runtime.enter();
+        let listeners = self.components.executor.quit_requests.borrow().all();
+        for listener in listeners {
+            if let Err(message) = caught(|| listener()) {
+                log::error!(target: "js", "a quit request listener failed: {message}");
+            }
+        }
+        self.apply_actions();
+    }
+
+    /// Tells the platform whether its quit requests go to the app, when
+    /// that changed since the last call (a listener came or went): whether
+    /// it did.
+    pub(super) fn sync_quit_requests(&mut self) -> bool {
+        let asks = !self.components.executor.quit_requests.borrow().is_empty();
+        if asks == self.components.asks_quit {
+            return false;
+        }
+        self.components.asks_quit = asks;
+        let _ = self.apply_op(crate::Op::Command {
+            id: crate::ROOT_ID,
+            command: crate::Command::Desktop(Box::new(
+                crate::desktop::DesktopCommand::SetQuitOnRequest(!asks),
+            )),
+        });
+        true
     }
 
     /// Whether the work quit listeners started is still running.
@@ -2298,19 +2347,35 @@ impl<M: TextEngine> Core<M> {
                 // The wrapper reads its position from signals.
                 let count_signal = list.map(|list| self.list_count(list, count));
                 let made = std::cell::Cell::new(None);
+                let requested = std::cell::Cell::new(None);
+                let tracks_request =
+                    list.is_some_and(|list| self.components.virtual_lists.contains_key(&list));
                 let build = || {
-                    let at = row_position(index, count, count_signal, &made);
+                    let at = row_position(
+                        index,
+                        count,
+                        count_signal,
+                        &made,
+                        tracks_request.then_some(&requested),
+                    );
                     view().child(place(Child::row(), at)).into_element().0
                 };
                 // The wrapper is the placing component's.
                 let parent = self.list_component_owner(list);
                 let el = self.build_cell(parent, inst, build);
                 inst.row_index = made.take();
-                if let (Some(list), Some(index), Some(owner)) =
-                    (list, inst.row_index, inst.cell_owner)
+                if let (Some(list), Some(index), Some(owner), Some(requested)) =
+                    (list, inst.row_index, inst.cell_owner, requested.take())
                     && let Some(state) = self.components.virtual_lists.get(&list)
                 {
-                    state.rows.borrow_mut().insert(host, (index, owner));
+                    state.rows.borrow_mut().insert(
+                        host,
+                        CellRow {
+                            index,
+                            owner,
+                            requested,
+                        },
+                    );
                 }
                 match el {
                     Ok(el) => el,
@@ -2355,8 +2420,10 @@ impl<M: TextEngine> Core<M> {
                     Some((count, row, separator, rows, scope)) => {
                         let count_signal = Some(self.list_count(list, count));
                         let made = std::cell::Cell::new(None);
+                        let requested = std::cell::Cell::new(None);
                         let build = || {
-                            let at = row_position(index, count, count_signal, &made);
+                            let at =
+                                row_position(index, count, count_signal, &made, Some(&requested));
                             let row = row(at);
                             // Between rows: after each but the last (before
                             // it, inverted), while it is not.
@@ -2379,8 +2446,17 @@ impl<M: TextEngine> Core<M> {
                         let parent = scope.unwrap_or_else(|| self.list_component_owner(Some(list)));
                         let el = self.build_cell(parent, inst, build);
                         inst.row_index = made.take();
-                        if let (Some(index), Some(owner)) = (inst.row_index, inst.cell_owner) {
-                            rows.borrow_mut().insert(host, (index, owner));
+                        if let (Some(index), Some(owner), Some(requested)) =
+                            (inst.row_index, inst.cell_owner, requested.take())
+                        {
+                            rows.borrow_mut().insert(
+                                host,
+                                CellRow {
+                                    index,
+                                    owner,
+                                    requested,
+                                },
+                            );
                         }
                         match el {
                             Ok(el) => el,
@@ -3192,6 +3268,21 @@ impl<M: TextEngine> Core<M> {
             // its focus (Android: an input that gains a sibling would lose
             // the keyboard on each keystroke).
             let ids: Vec<NodeId> = wanted().copied().collect();
+            // A first fill appends them in order: no child to find its place
+            // among (from the end, each would scan the ones placed already).
+            let empty = self
+                .key(parent)
+                .is_ok_and(|k| self.nodes[k as usize].children.is_empty());
+            if empty {
+                for &child in &ids {
+                    let _ = self.apply_op(Op::Insert {
+                        parent,
+                        child,
+                        before: None,
+                    });
+                }
+                return out;
+            }
             let mut before = None;
             for &child in ids.iter().rev() {
                 if !self.precedes(parent, child, before) {
@@ -4459,13 +4550,13 @@ impl<M: TextEngine> Core<M> {
             let made = std::cell::Cell::new(false);
             crate::element::computed(move || {
                 let (count, keys) = rows();
-                let splice = match (&*last.borrow(), &keys) {
-                    (Some(old), Some(new)) => crate::element::virtual_list::splice(old, new),
+                let change = match (&*last.borrow(), &keys) {
+                    (Some(old), Some(new)) => crate::element::virtual_list::rows_change(old, new),
                     _ => None,
                 };
                 last.replace(keys.clone());
                 if made.replace(true) {
-                    move_rows(&cells, splice, count);
+                    move_rows(&cells, change.as_ref(), count);
                     count_signal.set(count as usize);
                     patches.borrow_mut().push(super::views::Patch::Rows {
                         list: id,
@@ -4520,12 +4611,23 @@ impl<M: TextEngine> Core<M> {
         keys: Option<&Rc<[u64]>>,
     ) {
         if let (Some((_, Some(old))), Some(new)) = (before, keys)
-            && let Some((at, removed, inserted)) = crate::element::virtual_list::splice(old, new)
+            && let Some(change) = crate::element::virtual_list::rows_change(old, new)
         {
-            let _ = self.apply_op(Op::SetProp {
-                id,
-                prop: Prop::Splice(at, removed, inserted),
-            });
+            if change.reordered() {
+                if let Ok(key) = self.key(id) {
+                    let node = &mut self.nodes[key as usize];
+                    let loads_at_start = node.events.contains(EventKind::LoadMoreAtStart);
+                    if let Some(list) = node.list.as_mut() {
+                        list.loads_at_start = loads_at_start;
+                        list.reorder(&change);
+                    }
+                }
+            } else {
+                let _ = self.apply_op(Op::SetProp {
+                    id,
+                    prop: Prop::Splice(change.at, change.removed, change.inserted),
+                });
+            }
         }
         if before.map(|(count, _)| *count) != Some(count) {
             let _ = self.apply_op(Op::SetProp {
@@ -4619,9 +4721,45 @@ impl<M: TextEngine> Core<M> {
         bound
     }
 
+    /// Publishes assignment changes of this updated list only. Cached cells
+    /// keep their index and owner after release; that is not native demand.
+    pub(super) fn sync_virtual_requests(&self, list: NodeId) {
+        let Some(state) = self.components.virtual_lists.get(&list) else {
+            return;
+        };
+        let Ok(key) = self.key(list) else {
+            return;
+        };
+        let Some(native) = self.nodes[key as usize].list.as_ref() else {
+            return;
+        };
+        let _entered = self.components.runtime.enter();
+        for (slot, native) in native.slots.iter().enumerate() {
+            for part in [state.cells.get(slot), state.contents.get(slot)]
+                .into_iter()
+                .flatten()
+            {
+                let binding = state.rows.borrow().get(part).copied();
+                if let Some(binding) = binding
+                    && binding.owner.is_live()
+                {
+                    // A pending bind can still hold its previous row: its new
+                    // assignment is published with its new index below.
+                    let requested = native
+                        .index
+                        .is_some_and(|index| index as usize == binding.index.get_untracked());
+                    if binding.requested.get_untracked() != requested {
+                        binding.requested.set(requested);
+                    }
+                }
+            }
+        }
+    }
+
     fn bind_virtual_cell(&mut self, list: NodeId, slot: usize, index: usize) {
         let state = &self.components.virtual_lists[&list];
         let owner = state.owner;
+        let rows = state.rows.clone();
         let cell = match state.cells.get(slot).copied().filter(|&c| c != 0) {
             Some(cell) => {
                 let content = state.contents.get(slot).copied().filter(|&c| c != 0);
@@ -4638,6 +4776,12 @@ impl<M: TextEngine> Core<M> {
                             && inst.cell_owner.is_some_and(|o| o.is_live())
                         {
                             row.set(index);
+                            let binding = rows.borrow().get(&part).copied();
+                            if let Some(binding) = binding
+                                && !binding.requested.get_untracked()
+                            {
+                                binding.requested.set(true);
+                            }
                             continue;
                         }
                     }
@@ -5629,6 +5773,9 @@ impl<M: TextEngine> Core<M> {
                 self.set_builtin_scrollbars(theme.map(|theme| (source, theme)))
             }
             Action::Measure(id, answer) => self.components.measures.push((id, answer)),
+            Action::TextGeometry(id, query, answer) => {
+                self.components.text_geometries.push((id, query, answer))
+            }
             Action::MeasureScrollPosition(id, answer) => {
                 self.components.scroll_positions.push((id, answer))
             }
@@ -6135,6 +6282,10 @@ impl<M: TextEngine> Core<M> {
                             if id == crate::ROOT_ID =>
                         {
                             self.components.runtime.main_close_pressed(*reason);
+                        }
+                        crate::desktop::WindowEvent::QuitRequest if id == crate::ROOT_ID => {
+                            self.quit_requested();
+                            return true;
                         }
                         _ => {}
                     }
@@ -6757,7 +6908,11 @@ fn dispose_rows(rows: &std::rc::Weak<RefCell<CellRowMap>>) {
     let Some(rows) = rows.upgrade() else {
         return;
     };
-    let owners: Vec<_> = rows.borrow_mut().drain().map(|(_, (_, o))| o).collect();
+    let owners: Vec<_> = rows
+        .borrow_mut()
+        .drain()
+        .map(|(_, row)| row.owner)
+        .collect();
     for owner in owners {
         owner.dispose();
     }
@@ -6768,11 +6923,11 @@ fn dispose_rows(rows: &std::rc::Weak<RefCell<CellRowMap>>) {
 /// row went keeps its index (the list frees it, and binds it to another row
 /// before showing it again) while that is a row; past the rows, its content
 /// is disposed, before its bindings could read there.
-fn move_rows(cells: &CellRows, splice: Option<(u32, u32, u32)>, count: u32) {
+fn move_rows(cells: &CellRows, change: Option<&virtual_list::RowsChange>, count: u32) {
     let parts: Vec<_> = cells
         .borrow()
         .iter()
-        .map(|(&id, &(index, owner))| (id, index, owner))
+        .map(|(&id, row)| (id, row.index, row.owner))
         .collect();
     let mut gone = Vec::new();
     for (id, index, owner) in parts {
@@ -6781,17 +6936,9 @@ fn move_rows(cells: &CellRows, splice: Option<(u32, u32, u32)>, count: u32) {
             continue;
         }
         let i = index.get_untracked();
-        let to = match splice {
-            Some((at, removed, inserted)) => {
-                let (at, removed, inserted) = (at as usize, removed as usize, inserted as usize);
-                if i < at || (at..at + removed).contains(&i) {
-                    i
-                } else {
-                    i - removed + inserted
-                }
-            }
-            None => i,
-        };
+        let to = change
+            .and_then(|change| change.position(i as u32))
+            .map_or(i, |position| position as usize);
         if to < count as usize {
             index.set(to);
         } else {
@@ -6813,12 +6960,20 @@ fn row_position(
     count: usize,
     count_signal: Option<crate::element::Signal<usize>>,
     made: &std::cell::Cell<Option<crate::element::Signal<usize>>>,
+    requested: Option<&std::cell::Cell<Option<crate::element::Signal<bool>>>>,
 ) -> Position {
     match count_signal {
         Some(count) => {
             let index = crate::element::signal(index);
             made.set(Some(index));
-            Position::of(index.node(), count.node())
+            let at = Position::of(index.node(), count.node());
+            if let Some(requested) = requested {
+                let signal = crate::element::signal(true);
+                requested.set(Some(signal));
+                at.with_requested(signal.node())
+            } else {
+                at
+            }
         }
         None => Position::fixed(index, count),
     }

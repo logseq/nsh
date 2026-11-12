@@ -1,5 +1,15 @@
 # Styles, classes and effects
 
+`fontSize` additionally accepts a nonnegative finite `em` length, resolved against
+the actual enclosing node's resolved font size before this node's line height and
+letter spacing. Rust uses `text_size(relative(1.5))`, styles use
+`fontSize: "1.5em"`, and classes use `text-[1.5em]`. The typed declaration is
+`StyleDecl::Set(StyleKey::FontSize, PropertyValue::FontSizeEm(1.5.into()))`.
+An absolute size or a reset clears the ratio. Unset descendants inherit the
+computed size once; explicit nested ratios multiply their own parent size.
+Changing a parent size uses the existing text invalidation and inheritance path.
+Existing numeric point sizes, defaults and `rem` class sizes retain their meaning.
+
 - **Principles** (frozen with the first recorded release):
   1. One set of properties, three ways to write it (Rust `Styled`, `style` keys, classes), one meaning; the names are
      CSS's properties, but for the few a common form says more plainly ("Forms past CSS's").

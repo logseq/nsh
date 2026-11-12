@@ -192,6 +192,12 @@ pub(crate) enum Action {
     /// Measures the node with the layout of the commit the action goes out
     /// with; the measurement resolves the slot.
     Measure(NodeId, AnswerSlot<Option<crate::Measurement>>),
+    /// Reads the text geometry after this commit's final text layout.
+    TextGeometry(
+        NodeId,
+        crate::TextGeometryQuery,
+        AnswerSlot<Option<crate::TextGeometry>>,
+    ),
     /// Measures where the list's viewport starts among its rows with the
     /// layout of the commit the action goes out with; the position
     /// resolves the slot.
@@ -427,6 +433,8 @@ pub(crate) struct Executor {
     pub(crate) quit: Rc<RefCell<super::quit::QuitListeners>>,
     /// The quit listeners' work still running ([`crate::Core::start_quit`]).
     pub(crate) quitting: Rc<std::cell::Cell<usize>>,
+    /// What hears the user ask to quit ([`super::desktop::on_quit_request`]).
+    pub(crate) quit_requests: Rc<RefCell<super::quit::QuitRequestListeners>>,
     /// The views' keyboard shortcuts.
     pub(crate) keys: Rc<RefCell<super::keys::ViewKeys>>,
     /// The views' menus' handlers.

@@ -197,6 +197,7 @@ style id:docs opacity 1
 # press.
 tap text:Docs
 expect Log: open https://example.com/docs, press
+expect Press detail: false:false:false:false
 # `accessibilityLabel`: what screen readers say, and what a label finds;
 # `openWith="app"` leaves the opening to `onOpen`.
 prop id:order role link
@@ -227,6 +228,7 @@ covers [props] disabledStyle
 covers [props] hoverStyle
 covers [events] Link.onOpen
 covers [events] onPress
+covers [events] Link.onPressDetail
 # base-dialog
 tap id:case-base-dialog
 # (appearing, going away, Escape / back and swipes) are events here: the
@@ -1059,6 +1061,7 @@ prop id:kept accessibilityLabel Kept
 prop id:kept accessibilityState checked=true
 tap label:Kept
 expect Asked: false
+expect Detail: false:false:false:false:false
 prop id:kept accessibilityState checked=true
 # `role` says what it is instead of a checkbox.
 prop id:menu role menuitem
@@ -1092,6 +1095,7 @@ covers [props] indeterminateStyle
 covers [props] accessibilityLabel
 covers [props] role
 covers [events] onChange
+covers [events] onChangeDetail
 # base-radio
 tap id:case-base-radio
 # The group is a radio group for screen readers, named by the app; each

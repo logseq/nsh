@@ -257,8 +257,9 @@ impl VirtualList {
         self
     }
 
-    /// The rows' identities, in order (any hashable id per row), read in a
-    /// binding:
+    /// The rows' stable, unique identities, in order, read in a binding.
+    /// Retained cells and measurements follow them through insertion,
+    /// removal and reorder:
     /// `.keys(move || rows.with(|r| r.iter().map(|r| r.id).collect::<Vec<_>>()))`.
     pub fn keys<K: Hash, I: IntoIterator<Item = K>>(
         mut self,
@@ -558,6 +559,66 @@ pub(crate) fn splice(old: &[u64], new: &[u64]) -> Option<(u32, u32, u32)> {
     (removed > 0 || inserted > 0).then_some((start as u32, removed as u32, inserted as u32))
 }
 
+/// A source change: ordinary splices keep their fast path; keys retained
+/// within a replacement span can move instead of losing their cells.
+pub(crate) struct RowsChange {
+    pub(crate) at: u32,
+    pub(crate) removed: u32,
+    pub(crate) inserted: u32,
+    retained: Option<Vec<Option<u32>>>,
+}
+
+impl RowsChange {
+    /// The new position of an old item, or none when its key went away.
+    pub(crate) fn position(&self, index: u32) -> Option<u32> {
+        if index < self.at {
+            Some(index)
+        } else if index >= self.at + self.removed {
+            Some(index - self.removed + self.inserted)
+        } else {
+            self.retained
+                .as_ref()
+                .and_then(|positions| positions[(index - self.at) as usize])
+        }
+    }
+
+    pub(crate) fn reordered(&self) -> bool {
+        self.retained.is_some()
+    }
+}
+
+/// Builds key lookup only when both ends of a changed span contain items.
+/// Scrolling, property updates and pure insertion/removal never allocate it.
+pub(crate) fn rows_change(old: &[u64], new: &[u64]) -> Option<RowsChange> {
+    let (at, removed, inserted) = splice(old, new)?;
+    let mut change = RowsChange {
+        at,
+        removed,
+        inserted,
+        retained: None,
+    };
+    if removed == 0 || inserted == 0 {
+        return Some(change);
+    }
+    let old = &old[at as usize..(at + removed) as usize];
+    let new = &new[at as usize..(at + inserted) as usize];
+    let positions: rustc_hash::FxHashMap<_, _> = new
+        .iter()
+        .enumerate()
+        .map(|(index, key)| (*key, at + index as u32))
+        .collect();
+    let unique: rustc_hash::FxHashSet<_> = old.iter().copied().collect();
+    // Preserve the old replacement behavior for ambiguous duplicate keys.
+    if positions.len() != new.len() || unique.len() != old.len() {
+        return Some(change);
+    }
+    let retained: Vec<_> = old.iter().map(|key| positions.get(key).copied()).collect();
+    if retained.iter().any(Option::is_some) {
+        change.retained = Some(retained);
+    }
+    Some(change)
+}
+
 #[cfg(test)]
 mod tests {
     use super::ViewableItems;
@@ -587,5 +648,26 @@ mod tests {
         assert_eq!(splice(&[1, 2, 3], &[1, 3]), Some((1, 1, 0)));
         assert_eq!(splice(&[1, 2, 3], &[1, 2, 3, 4]), Some((3, 0, 1)));
         assert_eq!(splice(&[1, 1], &[1]), Some((1, 1, 0)));
+    }
+
+    #[test]
+    fn source_changes_follow_retained_keys_and_keep_simple_splices() {
+        let change = super::rows_change(&[10, 20, 30, 40], &[10, 40, 30, 20]).unwrap();
+        assert!(change.reordered());
+        assert_eq!(
+            (0..4).map(|i| change.position(i)).collect::<Vec<_>>(),
+            [Some(0), Some(3), Some(2), Some(1)]
+        );
+        let change = super::rows_change(&[10, 20, 30, 40], &[10, 40, 50, 30]).unwrap();
+        assert_eq!(
+            (0..4).map(|i| change.position(i)).collect::<Vec<_>>(),
+            [Some(0), None, Some(3), Some(1)]
+        );
+        let change = super::rows_change(&[10, 20], &[10, 30, 20]).unwrap();
+        assert!(!change.reordered());
+        assert_eq!(change.position(1), Some(2));
+        assert!(super::rows_change(&[10, 20], &[10, 20]).is_none());
+        let change = super::rows_change(&[10, 10, 20], &[20, 10, 10]).unwrap();
+        assert!(!change.reordered());
     }
 }

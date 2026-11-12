@@ -338,7 +338,7 @@ fn activate(surface: &Rc<Surface>, view: &NshView) {
             }
         });
     } else {
-        crate::input::activate(surface, view);
+        crate::input::activate(surface, view, Default::default());
     }
 }
 

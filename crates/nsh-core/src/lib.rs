@@ -65,6 +65,8 @@ mod style;
 pub mod svg;
 pub mod tailwind;
 mod text;
+mod text_geometry;
+pub use text_geometry::{TextGeometry, TextGeometryQuery, TextGeometryResult};
 pub mod text_edit;
 pub mod time;
 mod transform;
@@ -103,11 +105,12 @@ pub use crate::{
         ImageSource, KeyboardAppearance, KeyboardDismissMode, KeyboardTaps, KeyboardType,
         ListAlignment, ListContentStyle, ListViewport, ModalAnimation, ModalPresentation,
         ModalProp, MouseButton, MouseEvent, NativeProp, NodeId, Op, OverlayProp, PasteBehavior,
-        PasteEvent, PastedFile, PayloadValue, PointerType, PressEvent, Prop, ROOT_ID, ResizeMode,
-        ReturnKeyType, RevealOptions, ScreenAnimation, ScreenProp, ScrollAlignment, ScrollProp,
-        ScrollbarSetting, SnapAlignment, StatusBarConfig, StatusBarSetting, StatusBarStyle,
-        SubmitBehavior, Tag, TouchEvent, TouchPhase, TouchPoint, TransitionFallback, Viewability,
-        WebElement, WebInput, WebKey, WebLoad, WebSource, WheelDelta, WheelEvent,
+        PasteEvent, PastedFile, PayloadValue, PinchEvent, PinchPhase, PointerType, PressEvent,
+        Prop, ROOT_ID, ResizeMode, ReturnKeyType, RevealOptions, ScreenAnimation, ScreenProp,
+        ScrollAlignment, ScrollProp, ScrollbarSetting, SnapAlignment, StatusBarConfig,
+        StatusBarSetting, StatusBarStyle, SubmitBehavior, Tag, TouchEvent, TouchPhase, TouchPoint,
+        TransitionFallback, Viewability, WebElement, WebInput, WebKey, WebLoad, WebSource,
+        WheelDelta, WheelEvent,
     },
     props::{
         Accessibility, AccessibilityActionDef, AccessibilityCurrent, AccessibilityProp,

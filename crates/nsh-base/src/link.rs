@@ -64,6 +64,20 @@ pub struct LinkProps {
     pub children: Prop<Children>,
 }
 
+/// Modifier keys of the native activation that also emits `LinkEvent::Press`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, JsObject)]
+#[non_exhaustive]
+pub struct LinkPressDetail {
+    /// Shift was held.
+    pub shift: bool,
+    /// Control was held.
+    pub control: bool,
+    /// Option (Apple platforms) or Alt was held.
+    pub alt: bool,
+    /// Command (Apple platforms) or Super was held.
+    pub platform: bool,
+}
+
 /// The events of a [`Link`].
 #[derive(Debug, Clone, PartialEq, Event)]
 pub enum LinkEvent {
@@ -74,6 +88,9 @@ pub enum LinkEvent {
     Open(SharedString),
     /// The link was pressed, after it opened its `href` (or with none).
     Press,
+    /// The same activation with its native modifier keys, after `Press`.
+    #[args(event)]
+    PressDetail(LinkPressDetail),
 }
 
 /// A link: content that goes somewhere when pressed (a page, a site, a
@@ -117,7 +134,13 @@ pub fn Link(props: LinkProps, cx: Scope<LinkEvent>) -> impl IntoElement {
                 props.href.get()
             }
         }))
-        .on_press(move |_: &()| {
+        .on_press(move |press: &nsh_core::PressEvent| {
+            let detail = LinkPressDetail {
+                shift: press.modifiers.shift,
+                control: press.modifiers.ctrl,
+                alt: press.modifiers.alt,
+                platform: press.modifiers.cmd,
+            };
             if let Some(href) = props.href.get_untracked() {
                 cx.emit(LinkEvent::Open(href.clone()));
                 if props.open_with.get_untracked() == LinkOpenWith::System
@@ -129,6 +152,7 @@ pub fn Link(props: LinkProps, cx: Scope<LinkEvent>) -> impl IntoElement {
                 }
             }
             cx.emit(LinkEvent::Press);
+            cx.emit(LinkEvent::PressDetail(detail));
         })
         // Where it goes, shown while the pointer rests on it, below the
         // link, with its `title` above the destination in the same bubble

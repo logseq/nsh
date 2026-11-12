@@ -200,7 +200,10 @@ impl ResolvedTextStyle {
     /// Applies the properties set on a node on top of the inherited style.
     #[inline]
     pub(crate) fn inherit(self, style: &TextStyle) -> Self {
-        let font_size = style.font_size.unwrap_or(self.font_size);
+        let font_size = match style.font_size_em {
+            Some(em) => em * self.font_size,
+            None => style.font_size.unwrap_or(self.font_size),
+        };
         // A multiple follows each nested font size (unitless CSS
         // line-height); points stay points.
         let (line_height, line_height_multiple) = match (
@@ -822,6 +825,43 @@ impl AttributedText {
             && selection_color == &other.selection_color
             && attachments == &other.attachments
             && spans_same_but_colors(spans, &other.spans)
+    }
+
+    /// The characters (UTF-16 offsets; ascending, apart) drawn otherwise in
+    /// `other`, when the two texts differ at most in colors, hidden runs
+    /// and test metadata, as the core's colors-only path allows; `None`
+    /// when they differ in anything else. A platform that draws colors from
+    /// the text and keeps the layout redraws only where these lie.
+    pub fn recolored_ranges(&self, other: &Self) -> Option<Vec<std::ops::Range<u32>>> {
+        if !self.same_but_colors(other) {
+            return None;
+        }
+        let mut out: Vec<std::ops::Range<u32>> = Vec::new();
+        // Both cover the string end to end (`same_but_colors`): walk the
+        // pieces where they overlap.
+        let (mut a, mut b) = (self.spans.iter().peekable(), other.spans.iter().peekable());
+        while let (Some(x), Some(y)) = (a.peek(), b.peek()) {
+            let (start, end) = (x.start.max(y.start), x.end.min(y.end));
+            if start < end && x.style != y.style {
+                match out.last_mut() {
+                    Some(last) if last.end >= start => last.end = last.end.max(end),
+                    _ => out.push(start..end),
+                }
+            }
+            match x.end.cmp(&y.end) {
+                std::cmp::Ordering::Less => {
+                    a.next();
+                }
+                std::cmp::Ordering::Greater => {
+                    b.next();
+                }
+                std::cmp::Ordering::Equal => {
+                    a.next();
+                    b.next();
+                }
+            }
+        }
+        Some(out)
     }
 
     /// Equality of the content the platform draws, excluding test metadata.
@@ -1682,6 +1722,45 @@ pub fn font_family(data: &[u8]) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn font_size_ems_resolve_once_against_each_actual_parent() {
+        let parent = ResolvedTextStyle::default().inherit(&TextStyle {
+            font_size: Some(px(20.0)),
+            line_height_multiple: Some(1.2),
+            ..Default::default()
+        });
+        let relative = TextStyle {
+            font_size_em: Some(1.5),
+            letter_spacing_em: Some(0.1),
+            ..Default::default()
+        };
+        let child = parent.inherit(&relative);
+        assert_eq!(child.font_size, px(30.0));
+        assert_eq!(child.line_height, px(36.0));
+        assert_eq!(child.letter_spacing, px(3.0));
+        let inherited = child.inherit(&TextStyle::default());
+        assert_eq!(inherited.font_size, px(30.0));
+        let nested = child.inherit(&TextStyle {
+            font_size_em: Some(0.5),
+            ..Default::default()
+        });
+        assert_eq!(nested.font_size, px(15.0));
+        assert_eq!(nested.line_height, px(18.0));
+        assert_eq!(nested.letter_spacing, px(3.0));
+        let resized = ResolvedTextStyle {
+            font_size: px(32.0),
+            ..parent
+        }
+        .inherit(&relative);
+        assert_eq!(resized.font_size, px(48.0));
+        assert!((resized.line_height.0 - 57.6).abs() < 0.001);
+        let reset = resized.inherit(&TextStyle {
+            font_size: Some(px(14.0)),
+            ..Default::default()
+        });
+        assert_eq!(reset.font_size, px(14.0));
+    }
 
     #[test]
     fn push_merges_and_counts_utf16() {

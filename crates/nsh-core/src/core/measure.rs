@@ -224,6 +224,95 @@ impl<M: TextEngine> Core<M> {
         })
     }
 
+    /// Reads the final layout last sent to the text block's platform view.
+    /// This does not lay out text, uncull a view or emit a mount operation.
+    pub fn text_geometry(
+        &self,
+        id: NodeId,
+        query: crate::TextGeometryQuery,
+    ) -> Option<crate::TextGeometry> {
+        use crate::{TextGeometry, TextGeometryQuery as Q, TextGeometryResult as R};
+
+        let measurement = self.measure(id)?;
+        let key = self.key(id).ok()?;
+        let node = &self.nodes[key as usize];
+        if !node.created
+            || node.culled
+            || node.view_style.hidden
+            || node.hidden_in_text
+            || self.displays_none(key)
+        {
+            return None;
+        }
+        let super::LeafContext::Text(cx) = self.layout.get_node_context(node.layout?)? else {
+            return None;
+        };
+        let laid = cx.laid_out.as_ref()?;
+        let boundary = |offset: u32| {
+            let mut at = 0;
+            for character in laid.text.text.chars() {
+                if at >= offset {
+                    break;
+                }
+                at += character.len_utf16() as u32;
+            }
+            at == offset
+        };
+        let result = match query {
+            Q::Caret(position) => {
+                if !boundary(position.offset) {
+                    return None;
+                }
+                R::Caret(self.text_engine.caret_rect(&laid.layout, position))
+            }
+            Q::Range(range) => {
+                if range.start > range.end || !boundary(range.start) || !boundary(range.end) {
+                    return None;
+                }
+                let mut rects = Vec::new();
+                self.text_engine
+                    .range_rects(&laid.layout, range, &mut rects);
+                R::Range(rects)
+            }
+            Q::HitTest(point) => {
+                if !point.x.0.is_finite() || !point.y.0.is_finite() {
+                    return None;
+                }
+                let position = self.text_engine.hit_test(&laid.layout, point);
+                if !boundary(position.offset) {
+                    return None;
+                }
+                R::HitTest(position)
+            }
+            Q::Lines => R::Lines(self.text_engine.lines(&laid.layout)),
+        };
+        let mut page_scale = 1.0;
+        let mut parent = node.parent;
+        while parent != NO_KEY {
+            let ancestor = &self.nodes[parent as usize];
+            if matches!(
+                ancestor.kind,
+                Kind::Modal | Kind::HeaderItem | Kind::InputAccessory
+            ) {
+                break;
+            }
+            if let Some(scroll) = ancestor.scroll.as_deref() {
+                page_scale *= scroll.zoom;
+            }
+            if ancestor.is_overlay() {
+                break;
+            }
+            parent = ancestor.parent;
+        }
+        Some(TextGeometry {
+            measurement,
+            content: laid.content,
+            page_scale,
+            text: laid.text.clone(),
+            result,
+        })
+    }
+
     /// The `ScrollTo` commands that bring view `id` into view, as
     /// `options` places it: one for each scroll view around it that has to
     /// move, innermost first, each from where the ones inside it end up.

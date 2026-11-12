@@ -386,3 +386,14 @@ prop scroll:text:"Sticky heading" stickyHeaderIndices start=50 end=420
 # content's (690).
 frame id:sticky-animated 0 60 390 30
 prop scroll:text:"Sticky animated" stickyHeaderIndices start=60 end=660
+
+# relative-font-size
+tap id:case-relative-font-size
+style text:"Relative child" fontSize 30
+style text:"Nested ratio" fontSize 15
+style text:"Class ratio" fontSize 15
+tap text:"Resize font parent"
+style text:"Relative child" fontSize 48
+style text:"Nested ratio" fontSize 24
+style text:"Class ratio" fontSize 24
+covers [styles] fontSize
