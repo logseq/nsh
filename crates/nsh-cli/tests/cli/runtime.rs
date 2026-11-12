@@ -9,8 +9,11 @@ fn gpui_uses_its_workspaces_cargo_output_instead_of_a_stale_cli_sibling() {
         }
     }
     let dir = Directory(std::env::temp_dir().join(format!("nsh-cli-gpui-{}", std::process::id())));
-    let root = &dir.0;
-    fs::create_dir_all(root).unwrap();
+    fs::create_dir_all(&dir.0).unwrap();
+    // The CLI canonicalizes its workspace; macOS temporary paths may instead
+    // start with the /var alias while a subprocess reports /private/var.
+    let canonical_root = fs::canonicalize(&dir.0).unwrap();
+    let root = &canonical_root;
     fs::write(root.join("nsh.json"), "{}").unwrap();
     fs::write(
         root.join("App.tsx"),
