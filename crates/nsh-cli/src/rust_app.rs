@@ -3220,6 +3220,23 @@ mod tests {
         let written = std::fs::read_to_string(&hack).unwrap();
         assert_eq!(written.lines().nth(1), Some("# key: "), "{written}");
         assert!(!written.contains("dependencies"), "{written}");
+        // Build and package both select this policy. Regeneration must keep
+        // the final manifests and an already resolved lock byte-identical.
+        let manifests: Vec<_> = ["Cargo.toml", "hack/Cargo.toml", "describe/Cargo.toml"]
+            .into_iter()
+            .map(|name| (name, std::fs::read(app.workspace.join(name)).unwrap()))
+            .collect();
+        let lock = app.workspace.join("Cargo.lock");
+        std::fs::write(&lock, "version = 4\n").unwrap();
+        app.write_workspace().unwrap();
+        for (name, expected) in manifests {
+            assert_eq!(
+                std::fs::read(app.workspace.join(name)).unwrap(),
+                expected,
+                "{name}"
+            );
+        }
+        assert_eq!(std::fs::read_to_string(lock).unwrap(), "version = 4\n");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -607,6 +607,24 @@ enum ComponentAction {
 }
 
 impl Command {
+    /// Share development features only for commands that run multiple local
+    /// development programs. Packages keep the describing program and release
+    /// runner separate, so development-only features cannot enter the runner.
+    fn unify_features(&self) -> bool {
+        let here =
+            |target: run::Target| target == run::Target::native() && target != run::Target::Web;
+        match self {
+            Command::Test { .. } => true,
+            Command::Run { target, .. } => here(*target),
+            Command::Dev {
+                target,
+                server_only: false,
+                ..
+            } => here(*target),
+            _ => false,
+        }
+    }
+
     /// The entry argument of the commands that build an app.
     fn entry_mut(&mut self) -> Option<&mut PathBuf> {
         match self {
@@ -785,22 +803,7 @@ fn run(mut command: Command) -> anyhow::Result<()> {
             ui::path(entry)
         );
     }
-    // Only commands that build this machine's headless runner, host or
-    // runner after the describing program share one build with it; the
-    // others (a bundle, a check, a package or a host for another target)
-    // build only the describing program for this machine.
-    let here = |target: run::Target| target == run::Target::native() && target != run::Target::Web;
-    let unify = match &command {
-        Command::Test { .. } => true,
-        Command::Run { target, .. } => here(*target),
-        Command::Dev {
-            target,
-            server_only: false,
-            ..
-        } => here(*target),
-        Command::Package(args) => Some(args.target) == package::PackageTarget::desktop(),
-        _ => false,
-    };
+    let unify = command.unify_features();
     let app = match command.entry_mut() {
         Some(entry) => rust_app::of(entry, unify)?,
         None => None,
@@ -1114,9 +1117,53 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod command_tests {
-    use clap::Parser as _;
+    use clap::{Parser as _, ValueEnum as _};
 
     use super::{Cli, Command, run::Target};
+
+    #[test]
+    fn packages_use_build_feature_policy_without_changing_development_commands() {
+        let native = Target::native().to_possible_value().unwrap();
+        let native = native.get_name();
+        for entry in ["rust-app/nsh.json", "mixed-app/App.tsx"] {
+            for target in ["macos", "linux", "windows"] {
+                let package =
+                    Cli::try_parse_from(["nsh", "package", entry, "--target", target]).unwrap();
+                let build = Cli::try_parse_from(["nsh", "build", entry]).unwrap();
+                assert!(!package.command.unify_features(), "{entry}: {target}");
+                assert_eq!(
+                    package.command.unify_features(),
+                    build.command.unify_features()
+                );
+            }
+            assert!(
+                Cli::try_parse_from(["nsh", "test", entry])
+                    .unwrap()
+                    .command
+                    .unify_features()
+            );
+            for action in ["run", "dev"] {
+                assert!(
+                    Cli::try_parse_from(["nsh", action, entry, "--target", native])
+                        .unwrap()
+                        .command
+                        .unify_features()
+                );
+                assert!(
+                    !Cli::try_parse_from(["nsh", action, entry, "--target", "web"])
+                        .unwrap()
+                        .command
+                        .unify_features()
+                );
+            }
+            assert!(
+                !Cli::try_parse_from(["nsh", "dev", entry, "--server-only"])
+                    .unwrap()
+                    .command
+                    .unify_features()
+            );
+        }
+    }
 
     #[test]
     fn publish_ios_and_package_signing_have_separate_arguments() {
