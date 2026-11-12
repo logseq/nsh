@@ -200,7 +200,10 @@ impl ResolvedTextStyle {
     /// Applies the properties set on a node on top of the inherited style.
     #[inline]
     pub(crate) fn inherit(self, style: &TextStyle) -> Self {
-        let font_size = style.font_size.unwrap_or(self.font_size);
+        let font_size = match style.font_size_em {
+            Some(em) => em * self.font_size,
+            None => style.font_size.unwrap_or(self.font_size),
+        };
         // A multiple follows each nested font size (unitless CSS
         // line-height); points stay points.
         let (line_height, line_height_multiple) = match (
@@ -1719,6 +1722,45 @@ pub fn font_family(data: &[u8]) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn font_size_ems_resolve_once_against_each_actual_parent() {
+        let parent = ResolvedTextStyle::default().inherit(&TextStyle {
+            font_size: Some(px(20.0)),
+            line_height_multiple: Some(1.2),
+            ..Default::default()
+        });
+        let relative = TextStyle {
+            font_size_em: Some(1.5),
+            letter_spacing_em: Some(0.1),
+            ..Default::default()
+        };
+        let child = parent.inherit(&relative);
+        assert_eq!(child.font_size, px(30.0));
+        assert_eq!(child.line_height, px(36.0));
+        assert_eq!(child.letter_spacing, px(3.0));
+        let inherited = child.inherit(&TextStyle::default());
+        assert_eq!(inherited.font_size, px(30.0));
+        let nested = child.inherit(&TextStyle {
+            font_size_em: Some(0.5),
+            ..Default::default()
+        });
+        assert_eq!(nested.font_size, px(15.0));
+        assert_eq!(nested.line_height, px(18.0));
+        assert_eq!(nested.letter_spacing, px(3.0));
+        let resized = ResolvedTextStyle {
+            font_size: px(32.0),
+            ..parent
+        }
+        .inherit(&relative);
+        assert_eq!(resized.font_size, px(48.0));
+        assert!((resized.line_height.0 - 57.6).abs() < 0.001);
+        let reset = resized.inherit(&TextStyle {
+            font_size: Some(px(14.0)),
+            ..Default::default()
+        });
+        assert_eq!(reset.font_size, px(14.0));
+    }
 
     #[test]
     fn push_merges_and_counts_utf16() {

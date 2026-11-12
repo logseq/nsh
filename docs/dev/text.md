@@ -1,5 +1,9 @@
 # Text
 
+Relative `fontSize` (`em`) is retained in `TextStyle::font_size_em` and resolved by
+`ResolvedTextStyle::inherit` against the enclosing node before its own line height
+and letter spacing. It adds no layout query or secondary inheritance cache.
+
 - **Text**: `<Text>`; styles `numberOfLines`, `textOverflow` (`ellipsis|clip|ellipsis-start|ellipsis-middle`: `EllipsizeMode`'s
   `Tail|Clip|Head|Middle`), `fontFamily` (system or imported fonts:
   `import Inter from "./Inter.ttf"` evaluates to the family name and registers the font before the first frame; a host can register the same files itself, `NshView.registerFont` / `NshAppView.registerFont`, and the app names the family), `fontWeight`,

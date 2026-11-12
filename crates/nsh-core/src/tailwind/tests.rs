@@ -2307,3 +2307,15 @@ mod text_color_opacity {
         assert_eq!(s.text.line_height, Some(px(28.0)));
     }
 }
+
+#[test]
+fn arbitrary_relative_font_size_keeps_the_native_parent_ratio() {
+    for class in ["text-[1.5em]", "text-[length:1.5em]"] {
+        let style = styled(class);
+        assert_eq!(style.text.font_size, None, "{class}");
+        assert_eq!(style.text.font_size_em, Some(1.5), "{class}");
+    }
+    let style = styled("text-[1.5em]/6");
+    assert_eq!(style.text.font_size_em, Some(1.5));
+    assert_eq!(style.text.line_height, Some(px(24.0)));
+}

@@ -5,6 +5,7 @@
 import { type JSX, View, mount, signal } from "nsh";
 import CoreRegisterFont from "./core-register-font";
 import CoreTheme from "./core-theme";
+import RelativeFontSize from "./relative-font-size";
 import LayoutBox from "./layout-box";
 import LayoutDirection from "./layout-direction";
 import LayoutFlex from "./layout-flex";
@@ -15,6 +16,7 @@ import LayoutSticky from "./layout-sticky";
 const cases: Record<string, () => JSX.Element> = {
   "core-register-font": CoreRegisterFont,
   "core-theme": CoreTheme,
+  "relative-font-size": RelativeFontSize,
   "layout-box": LayoutBox,
   "layout-direction": LayoutDirection,
   "layout-flex": LayoutFlex,

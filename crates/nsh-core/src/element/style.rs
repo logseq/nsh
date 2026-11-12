@@ -3633,7 +3633,8 @@ pub trait Styled: Sized {
         self
     }
 
-    /// The font size, in points.
+    /// The font size: points, rems or a fraction of the enclosing node's
+    /// resolved font size (`relative(1.5)` is `1.5em`).
     fn text_size(mut self, size: impl IntoReactive<Length>) -> Self {
         self.style().bind_value(size, |s, size: Length| {
             s.lengths(&[StyleKey::FontSize], size);
