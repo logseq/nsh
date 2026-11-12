@@ -187,3 +187,30 @@ See [Accessibility](../docs/accessibility.md) for labels, roles and announcement
 - Desktops (macOS, Windows, Linux, GPUI) and the web: a press is a click. On macOS and the web, Space and Return also
   toggle the checkbox that has the keyboard focus.
 - Every platform draws what the app styles: the indicator, the mark and their transitions.
+
+## Activation modifiers
+
+`onChangeDetail` reports the same requested `checked` value as `onChange`, with
+`control`, `shift`, `platform` (Command/Super), and `alt` (Option/Alt). Its TSX
+argument is `{ event }`; Rust's `on_change_detail` receives
+`&CheckboxChangeDetail`. Pointer presses carry the native press's modifier keys.
+Focused keyboard activation on macOS and Linux carries the activating key's
+modifiers. Accessibility activation has no physical key event and reports all
+modifiers as false.
+
+```tsx
+<Checkbox
+  checked={selected()}
+  onChangeDetail={({ event }) => selectRow(event.checked, event.shift)}
+  accessibilityLabel="Select row"
+/>
+```
+
+Each enabled activation emits `Change(bool)` once, followed by
+`ChangeDetail(CheckboxChangeDetail)` once. Both contain the proposal computed
+before either callback runs, even when the first callback changes controlled
+state. Applications subscribing to both apply the state change only once. The
+checkbox continues to own pointer hit testing, keyboard activation and disabled
+behavior. Existing `onChange` arguments and controlled-state behavior are
+unchanged. Rust exhaustive matches on `CheckboxEvent` must handle the new
+`ChangeDetail` variant.

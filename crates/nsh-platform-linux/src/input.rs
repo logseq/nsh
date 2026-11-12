@@ -394,12 +394,24 @@ pub(crate) fn gestures(surface: &Rc<Surface>, view: &NshView, values: GestureVal
 }
 
 /// Presses a control without a pointer, after its input path admitted it.
-/// Keyboard and accessibility activation share the same payload and order.
-pub(crate) fn activate(surface: &Surface, view: &NshView) {
+/// Keyboard and accessibility activation share the event order; only keyboard
+/// activation carries source key modifiers.
+pub(crate) fn activate(surface: &Surface, view: &NshView, modifiers: nsh_core::keymap::Modifiers) {
     let events = view.state().events;
     for kind in [EventKind::PressDown, EventKind::PressUp, EventKind::Press] {
         if events.contains(kind) {
-            surface.event(view.id(), kind, EventPayload::None);
+            surface.event(
+                view.id(),
+                kind,
+                if modifiers == Default::default() {
+                    EventPayload::None
+                } else {
+                    EventPayload::Press(nsh_core::PressEvent {
+                        modifiers,
+                        ..Default::default()
+                    })
+                },
+            );
         }
     }
 }

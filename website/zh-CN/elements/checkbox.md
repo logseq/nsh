@@ -182,3 +182,30 @@ const some = () => selected().length > 0 && !all();
 - iOS、Android 和 Mac Catalyst：按压是在复选框上（包括它的标签）结束的一次轻点。
 - 桌面（macOS、Windows、Linux、GPUI）和 Web：按压是一次点击。在 macOS 和 Web 上，Space 和 Return 也会切换拥有键盘焦点的复选框。
 - 每个平台都按应用的样式绘制：指示器、标记以及它们的过渡。
+
+## Activation modifiers
+
+`onChangeDetail` reports the same requested `checked` value as `onChange`, with
+`control`, `shift`, `platform` (Command/Super), and `alt` (Option/Alt). Its TSX
+argument is `{ event }`; Rust's `on_change_detail` receives
+`&CheckboxChangeDetail`. Pointer presses carry the native press's modifier keys.
+Focused keyboard activation on macOS and Linux carries the activating key's
+modifiers. Accessibility activation has no physical key event and reports all
+modifiers as false.
+
+```tsx
+<Checkbox
+  checked={selected()}
+  onChangeDetail={({ event }) => selectRow(event.checked, event.shift)}
+  accessibilityLabel="Select row"
+/>
+```
+
+Each enabled activation emits `Change(bool)` once, followed by
+`ChangeDetail(CheckboxChangeDetail)` once. Both contain the proposal computed
+before either callback runs, even when the first callback changes controlled
+state. Applications subscribing to both apply the state change only once. The
+checkbox continues to own pointer hit testing, keyboard activation and disabled
+behavior. Existing `onChange` arguments and controlled-state behavior are
+unchanged. Rust exhaustive matches on `CheckboxEvent` must handle the new
+`ChangeDetail` variant.

@@ -24,6 +24,7 @@ function App() {
   const some = signal(true);
   const changes = signal(0);
   const asked = signal("");
+  const detail = signal("");
   const disabled = signal(true);
   const wide = signal(false);
   return (
@@ -45,8 +46,10 @@ function App() {
         <Text>All</Text>
       </Checkbox>
       <Text>{`Changes: ${changes()}`}</Text>
-      <Checkbox testID="kept" checked accessibilityLabel="Kept" onChange={({ checked }) => asked.set(String(checked))} {...parts} />
+      <Checkbox testID="kept" checked accessibilityLabel="Kept" onChange={({ checked }) => asked.set(String(checked))}
+        onChangeDetail={({ event }) => detail.set(`${event.checked}:${event.control}:${event.shift}:${event.platform}:${event.alt}`)} {...parts} />
       <Text>{`Asked: ${asked()}`}</Text>
+      <Text>{`Detail: ${detail()}`}</Text>
       <Checkbox testID="menu" role="menuitem" {...parts}>
         <Text>Menu</Text>
       </Checkbox>

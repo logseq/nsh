@@ -105,7 +105,18 @@ impl Headless {
             && nsh_core::input::presses_focused_control(stroke.key, stroke.modifiers)
         {
             for kind in [EventKind::PressDown, EventKind::PressUp, EventKind::Press] {
-                self.send(view, kind, EventPayload::None);
+                self.send(
+                    view,
+                    kind,
+                    if stroke.modifiers == Default::default() {
+                        EventPayload::None
+                    } else {
+                        EventPayload::Press(nsh_core::PressEvent {
+                            modifiers: stroke.modifiers,
+                            ..Default::default()
+                        })
+                    },
+                );
             }
             return self.done();
         }

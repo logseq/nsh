@@ -109,3 +109,79 @@ fn hit_slop_follows_a_binding_and_is_none_by_default() {
     // A checkbox without `hitSlop` never gets one.
     assert_eq!(hit_slop(&seen, widen), EdgeInsets::default());
 }
+
+/// Both event subscriptions observe one proposal from the native Checkbox.
+/// Changing controlled state in `on_change` must not change detail's proposal.
+#[component]
+fn CheckboxDetails() -> impl IntoElement {
+    let checked = signal(false);
+    let changes = signal(0u32);
+    let details = signal(0u32);
+    let last = signal(String::new());
+    view()
+        .child(
+            checkbox()
+                .accessibility_label("Details")
+                .checked(checked)
+                .on_change(move |value: &bool| {
+                    changes.update(|count| *count += 1);
+                    checked.set(*value);
+                })
+                .on_change_detail(move |event: &nsh_base::CheckboxChangeDetail| {
+                    details.update(|count| *count += 1);
+                    last.set(format!(
+                        "proposal:{} modifiers:{}{}{}{}",
+                        event.checked,
+                        event.control as u8,
+                        event.shift as u8,
+                        event.platform as u8,
+                        event.alt as u8,
+                    ));
+                })
+                .child(text("Details")),
+        )
+        .child(
+            checkbox()
+                .accessibility_label("Disabled details")
+                .disabled(true)
+                .on_change(move |_: &bool| changes.update(|count| *count += 100))
+                .on_change_detail(move |_: &nsh_base::CheckboxChangeDetail| {
+                    details.update(|count| *count += 100)
+                })
+                .child(text("Disabled details")),
+        )
+        .child(text(move || {
+            format!("changes:{} details:{}", changes.get(), details.get())
+        }))
+        .child(text(move || last.get()))
+}
+
+#[test]
+fn detail_uses_the_same_pointer_proposal_and_all_modifiers_once() {
+    let (mut app, _) = start::<CheckboxDetails>();
+    app.hold_keys("ctrl+shift+meta+alt", true).unwrap();
+    app.press("label:Details").unwrap();
+    app.wait_for("text:changes:1 details:1").unwrap();
+    app.wait_for("text:proposal:true modifiers:1111").unwrap();
+    app.hold_keys("ctrl+shift+meta+alt", false).unwrap();
+    app.press("label:Details").unwrap();
+    app.wait_for("text:changes:2 details:2").unwrap();
+    app.wait_for("text:proposal:false modifiers:0000").unwrap();
+    assert!(app.press("label:Disabled details").is_err());
+    app.wait_for("text:changes:2 details:2").unwrap();
+}
+
+#[test]
+fn detail_preserves_focused_keyboard_activation_modifiers_once() {
+    let mut config = EngineConfig::new(Root::of::<CheckboxDetails>());
+    config.environment.os = nsh_core::platform::Os::MacOs;
+    let mut app = Headless::start(config).unwrap();
+    app.first_render().unwrap();
+    app.press_key("tab").unwrap();
+    app.press_key("shift+space").unwrap();
+    app.wait_for("text:changes:1 details:1").unwrap();
+    app.wait_for("text:proposal:true modifiers:0100").unwrap();
+    app.press_key("return").unwrap();
+    app.wait_for("text:changes:2 details:2").unwrap();
+    app.wait_for("text:proposal:false modifiers:0000").unwrap();
+}

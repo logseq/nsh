@@ -1059,6 +1059,7 @@ prop id:kept accessibilityLabel Kept
 prop id:kept accessibilityState checked=true
 tap label:Kept
 expect Asked: false
+expect Detail: false:false:false:false:false
 prop id:kept accessibilityState checked=true
 # `role` says what it is instead of a checkbox.
 prop id:menu role menuitem
@@ -1092,6 +1093,7 @@ covers [props] indeterminateStyle
 covers [props] accessibilityLabel
 covers [props] role
 covers [events] onChange
+covers [events] onChangeDetail
 # base-radio
 tap id:case-base-radio
 # The group is a radio group for screen readers, named by the app; each

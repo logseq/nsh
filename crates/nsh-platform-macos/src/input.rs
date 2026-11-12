@@ -920,7 +920,7 @@ pub(crate) fn key(surface: &Rc<Surface>, event: &NSEvent, down: bool) -> bool {
     }
     if let Some(view) = control_activation_target(surface, event) {
         if down && !event.isARepeat() {
-            activate(surface, &view, "keyboard");
+            activate(surface, &view, "keyboard", modifiers(event.modifierFlags()));
         }
         return true;
     }
@@ -1076,12 +1076,23 @@ pub(crate) fn control_activation_target(surface: &Surface, event: &NSEvent) -> O
 /// Presses `view` with no pointer to report, as Return and Space press a
 /// focused control and `AXPress` presses any: its `onPressDown`,
 /// `onPressUp` and `onPress`. `from` names the source in the log.
-fn activate(surface: &Surface, view: &NshView, from: &str) {
+fn activate(surface: &Surface, view: &NshView, from: &str, modifiers: nsh_core::keymap::Modifiers) {
     let events = view.state().events;
     for kind in [EventKind::PressDown, EventKind::PressUp, EventKind::Press] {
         if events.contains(kind) {
             log::debug!(target: "nsh::input", "{} on {} ({from})", kind.prop_name(), view.id());
-            surface.event(view.id(), kind, EventPayload::None);
+            surface.event(
+                view.id(),
+                kind,
+                if modifiers == Default::default() {
+                    EventPayload::None
+                } else {
+                    EventPayload::Press(nsh_core::PressEvent {
+                        modifiers,
+                        ..Default::default()
+                    })
+                },
+            );
         }
     }
 }
@@ -1122,7 +1133,7 @@ pub(crate) fn accessibility_press(surface: &Surface, view: &NshView) -> bool {
         crate::window::control_window(&surface, &window, control, false);
         return true;
     }
-    activate(surface, view, "accessibility");
+    activate(surface, view, "accessibility", Default::default());
     true
 }
 

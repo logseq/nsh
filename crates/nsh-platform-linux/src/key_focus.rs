@@ -223,7 +223,7 @@ fn press(surface: &Surface, view: &NshView, key: Key, held: nsh_core::keymap::Mo
     {
         return false;
     }
-    crate::input::activate(surface, view);
+    crate::input::activate(surface, view, held);
     true
 }
 
